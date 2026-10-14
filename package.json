@@ -1,0 +1,58 @@
+{
+  "name": "use-idb",
+  "version": "0.1.0",
+  "description": "A lightweight, type-safe React hook wrapper for IndexedDB",
+  "keywords": [
+    "hook",
+    "idb",
+    "indexeddb",
+    "react",
+    "storage",
+    "typescript"
+  ],
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.2.0",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^26.0.0",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.7"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  }
+}
