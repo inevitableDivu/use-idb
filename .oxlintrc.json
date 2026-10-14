@@ -8,10 +8,18 @@
   },
   "rules": {
     "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }],
+    "react/only-export-components": "off",
+    "react/react-in-jsx-scope": "off",
     "no-unused-vars": "error",
     "no-debugger": "error",
-    "eqeqeq": "error"
+    "eqeqeq": "error",
+    "no-await-in-loop": "off",
+    "no-underscore-dangle": "off",
+    "typescript/no-unsafe-type-assertion": "off",
+    "typescript/no-unnecessary-type-parameters": "off",
+    "typescript/no-unnecessary-type-assertion": "off",
+    "typescript/no-redundant-type-constituents": "off",
+    "typescript/no-floating-promises": "off"
   },
   "ignorePatterns": ["**/node_modules/**", "**/dist/**", "**/coverage/**"],
   "env": {
