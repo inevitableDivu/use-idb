@@ -8,34 +8,131 @@
  * - Configurable GC timer after zero active subscribers
  */
 
+/**
+ * Frozen, referentially stable query snapshot consumed synchronously by `useSyncExternalStore`.
+ *
+ * @template T - The stored data type.
+ */
 export interface QuerySnapshot<T = unknown> {
+  /**
+   * The active data value (incorporating any active optimistic overlays).
+   */
   readonly data: T | undefined;
+
+  /**
+   * `true` on initial read before data has been loaded.
+   */
   readonly isLoading: boolean;
+
+  /**
+   * `true` whenever an active asynchronous read is running.
+   */
   readonly isFetching: boolean;
+
+  /**
+   * Error caught during execution, or `null` if healthy.
+   */
   readonly error: Error | null;
 }
 
+/**
+ * Status lifecycle states of a cache entry.
+ */
 export type CacheEntryStatus = "idle" | "pending" | "resolved" | "error";
 
+/**
+ * Internal cache entry tracked inside {@link L1Cache}.
+ *
+ * @template T - Stored data type.
+ */
 export interface CacheEntry<T = unknown> {
+  /**
+   * Deterministic query hash.
+   */
   queryHash: string;
+
+  /**
+   * Set of object stores this query reads from.
+   */
   storeNames: Set<string>;
+
+  /**
+   * Optional key or key range dependency for fine-grained invalidation.
+   */
   keyDependency?: IDBValidKey | IDBKeyRange;
+
+  /**
+   * Optional index dependency name.
+   */
   indexDependency?: string;
+
+  /**
+   * Current lifecycle status.
+   */
   status: CacheEntryStatus;
+
+  /**
+   * Base resolved data from storage.
+   */
   data: T | undefined;
+
+  /**
+   * Optimistic overlay value before transaction commits.
+   */
   optimisticData?: T;
+
+  /**
+   * Error if operation rejected.
+   */
   error: Error | null;
+
+  /**
+   * Store generation counter value when read was initiated.
+   */
   generationAtStart: number;
+
+  /**
+   * Active promise used for React `<Suspense>` integration.
+   */
   promise?: Promise<T>;
+
+  /**
+   * Frozen snapshot returned synchronously to React components.
+   */
   snapshot: QuerySnapshot<T>;
+
+  /**
+   * Set of active subscriber listener callbacks.
+   */
   subscribers: Set<() => void>;
+
+  /**
+   * Active garbage collection timer running after zero subscribers remain.
+   */
   gcTimer?: ReturnType<typeof setTimeout>;
+
+  /**
+   * Background re-fetch callback triggered upon cache invalidation.
+   */
   fetcher?: () => Promise<unknown>;
 }
 
+/**
+ * Options for configuring {@link L1Cache}.
+ */
 export interface L1CacheOptions {
+  /**
+   * Maximum number of entries kept in cache before LRU eviction.
+   *
+   * @default 1000
+   */
   maxEntries: number;
+
+  /**
+   * Time in milliseconds before an entry with 0 subscribers is evicted from memory.
+   *
+   * @default 60000
+   */
   ttlMs: number;
 }
 

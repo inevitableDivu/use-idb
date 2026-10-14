@@ -1,14 +1,20 @@
 import type { ISyncPort, MutationEnvelope } from "../../ports/sync.port";
 
 /**
- * Cross-tab synchronization adapter using BroadcastChannel.
- * Filters out self-originated events via tabId comparison.
+ * Cross-tab synchronization adapter implementing {@link ISyncPort} via browser `BroadcastChannel`.
+ *
+ * Automatically filters out self-originated events by comparing incoming `originTabId` with local `tabId`.
  */
 export class BroadcastSyncAdapter implements ISyncPort {
   readonly tabId: string;
   private channel: BroadcastChannel | null = null;
   private listeners = new Set<(envelope: MutationEnvelope) => void>();
 
+  /**
+   * Constructs the BroadcastSyncAdapter and binds to a named channel.
+   *
+   * @param dbName - Target database name.
+   */
   constructor(dbName: string) {
     this.tabId =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -28,10 +34,21 @@ export class BroadcastSyncAdapter implements ISyncPort {
     }
   }
 
+  /**
+   * Broadcasts a mutation envelope to other tabs.
+   *
+   * @param envelope - Mutation metadata envelope.
+   */
   publish(envelope: MutationEnvelope): void {
     this.channel?.postMessage(envelope);
   }
 
+  /**
+   * Subscribes to mutation events originating from other tabs.
+   *
+   * @param listener - Callback receiving remote mutation envelopes.
+   * @returns Unsubscribe function.
+   */
   subscribe(listener: (envelope: MutationEnvelope) => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -39,6 +56,9 @@ export class BroadcastSyncAdapter implements ISyncPort {
     };
   }
 
+  /**
+   * Closes the active BroadcastChannel handle and clears listeners.
+   */
   close(): void {
     this.channel?.close();
     this.channel = null;

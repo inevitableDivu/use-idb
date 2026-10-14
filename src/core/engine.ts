@@ -17,13 +17,40 @@ import { DependencyTracker } from "./dependency-tracker";
 import { WriteCoalescer } from "./write-coalescer";
 import { QueryBuilder } from "./query-engine";
 
+/**
+ * Configuration options for creating an {@link Engine} instance.
+ */
 export interface EngineConfig {
+  /**
+   * Custom storage adapter implementing {@link IStoragePort}.
+   * If omitted, automatically selects {@link IndexedDBStorageAdapter} (or {@link MemoryStorageAdapter} fallback).
+   */
   storage?: IStoragePort;
+
+  /**
+   * Custom cross-tab synchronization adapter implementing {@link ISyncPort}.
+   * If omitted and BroadcastChannel is supported, uses {@link BroadcastSyncAdapter}.
+   */
   sync?: ISyncPort;
+
+  /**
+   * Concurrency lock adapter implementing {@link ILockPort}.
+   * If omitted and `navigator.locks` is available, uses {@link WebLocksAdapter}.
+   */
   lock?: ILockPort;
+
+  /**
+   * Middleware plugins to intercept write and read pipelines.
+   */
   middlewares?: IDBMiddleware[];
 }
 
+/**
+ * Enterprise Core Engine coordinating storage adapters, L1 snapshot cache,
+ * write coalescing, cross-tab synchronization, and query compilation.
+ *
+ * @template TSchema - Strongly typed database schema definition.
+ */
 export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
   readonly schema: TSchema;
   readonly storage: IStoragePort;
@@ -42,6 +69,12 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
     isPersisted: null,
   };
 
+  /**
+   * Constructs an Engine instance bound to the provided database schema.
+   *
+   * @param schema - Database schema including name, version, stores, and migration scripts.
+   * @param config - Optional adapter overrides and middlewares.
+   */
   constructor(schema: TSchema, config?: EngineConfig) {
     this.schema = schema;
 
@@ -270,6 +303,30 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
 
 // ── Factory Helpers ──
 
+/**
+ * Creates, configures, and auto-initializes a new {@link Engine} instance for the provided schema.
+ *
+ * In browser environments, automatically triggers asynchronous database opening in the background.
+ *
+ * @template TSchema - Schema definition type.
+ * @param schema - Database schema defining stores, indices, version, and migrations.
+ * @param config - Optional configuration and adapter overrides.
+ * @returns Fully configured {@link Engine} client.
+ *
+ * @example
+ * ```typescript
+ * import { createDatabase } from "use-idb";
+ *
+ * export const db = createDatabase({
+ *   name: "ecommerce-app",
+ *   version: 1,
+ *   stores: {
+ *     products: { keyPath: "id", indexes: { category: { keyPath: "category" } } },
+ *     cart: { keyPath: "itemId" },
+ *   },
+ * });
+ * ```
+ */
 export function createDatabase<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>>(
   schema: TSchema,
   config?: EngineConfig,
@@ -284,6 +341,13 @@ export function createDatabase<TSchema extends DatabaseSchema<any> = DatabaseSch
 
 let defaultEngineInstance: Engine | null = null;
 
+/**
+ * Retrieves the global singleton {@link Engine} instance used for zero-config key-value storage.
+ *
+ * Lazily creates a database named `"__use_idb_default__"` with a single `"keyval"` store on first invocation.
+ *
+ * @returns The default singleton {@link Engine} instance.
+ */
 export function getDefaultEngine(): Engine {
   if (!defaultEngineInstance) {
     defaultEngineInstance = createDatabase({

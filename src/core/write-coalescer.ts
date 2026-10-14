@@ -34,10 +34,23 @@ interface StoreBatch {
   microtaskScheduled: boolean;
 }
 
+/**
+ * Options for configuring the {@link WriteCoalescer}.
+ */
 export interface WriteCoalescerOptions {
+  /**
+   * Coalescing window in milliseconds. If 0, coalesces writes within the same microtask (`queueMicrotask`).
+   *
+   * @default 0
+   */
   coalesceWindowMs?: number;
 }
 
+/**
+ * Microtask write coalescer that queues concurrent writes and deletes per object store,
+ * coalescing multiple updates for the same key and flushing them inside a single atomic
+ * `readwrite` transaction.
+ */
 export class WriteCoalescer {
   private batches = new Map<string, StoreBatch>();
 

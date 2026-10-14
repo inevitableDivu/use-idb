@@ -34,10 +34,33 @@ function isEncryptedField(val: unknown): val is EncryptedField {
 }
 
 /**
- * Optional WebCrypto AES-GCM field encryption middleware.
- * Encrypts/decrypts specified fields transparently.
- * Skips fields that don't exist in the record.
- * Passes through unchanged if crypto.subtle is unavailable.
+ * Creates an {@link IDBMiddleware} that transparently encrypts and decrypts specified fields
+ * using authenticated AES-GCM (256-bit) via WebCrypto `crypto.subtle`.
+ *
+ * Each field encryption generates a fresh cryptographically random 12-byte IV.
+ * Fields not present in a record are skipped without error.
+ * If WebCrypto is unavailable (e.g. non-secure HTTP context), values pass through unmodified.
+ *
+ * @param key - AES-GCM `CryptoKey` generated via `crypto.subtle.generateKey` or imported with `importKey`.
+ * @param fieldPaths - Array of property field names on records to encrypt.
+ * @returns Configured {@link IDBMiddleware} instance.
+ *
+ * @example
+ * ```typescript
+ * import { createDatabase, createEncryptionMiddleware } from "use-idb";
+ *
+ * const key = await crypto.subtle.generateKey(
+ *   { name: "AES-GCM", length: 256 },
+ *   false,
+ *   ["encrypt", "decrypt"]
+ * );
+ *
+ * const db = createDatabase(schema, {
+ *   middlewares: [
+ *     createEncryptionMiddleware(key, ["ssn", "creditCardNumber"])
+ *   ]
+ * });
+ * ```
  */
 export function createEncryptionMiddleware(key: CryptoKey, fieldPaths: string[]): IDBMiddleware {
   const hasCrypto =

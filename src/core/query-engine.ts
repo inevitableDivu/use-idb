@@ -25,55 +25,123 @@ export class QueryBuilder<T> {
     };
   }
 
+  /**
+   * Targets a specific secondary index on the object store.
+   *
+   * @param indexName - Name of the index configured in schema.
+   * @returns Current QueryBuilder for chaining.
+   */
   where(indexName: string): this {
     this.ast.indexName = indexName;
     return this;
   }
 
+  /**
+   * Restricts results to an exact key match (`IDBKeyRange.only`).
+   *
+   * @param key - The exact key value.
+   * @returns Current QueryBuilder for chaining.
+   */
   equals(key: IDBValidKey): this {
     this.ast.range = IDBKeyRange.only(key);
     return this;
   }
 
+  /**
+   * Restricts results to a bounded key range (`IDBKeyRange.bound`).
+   *
+   * @param lower - Lower bound key.
+   * @param upper - Upper bound key.
+   * @param lowerOpen - Whether lower bound is exclusive (defaults to false).
+   * @param upperOpen - Whether upper bound is exclusive (defaults to false).
+   * @returns Current QueryBuilder for chaining.
+   */
   between(lower: IDBValidKey, upper: IDBValidKey, lowerOpen = false, upperOpen = false): this {
     this.ast.range = IDBKeyRange.bound(lower, upper, lowerOpen, upperOpen);
     return this;
   }
 
+  /**
+   * Restricts results to keys strictly above the specified key (`IDBKeyRange.lowerBound`).
+   *
+   * @param key - Lower bound key.
+   * @param open - Whether lower bound is exclusive (defaults to false).
+   * @returns Current QueryBuilder for chaining.
+   */
   above(key: IDBValidKey, open = false): this {
     this.ast.range = IDBKeyRange.lowerBound(key, open);
     return this;
   }
 
+  /**
+   * Restricts results to keys strictly below the specified key (`IDBKeyRange.upperBound`).
+   *
+   * @param key - Upper bound key.
+   * @param open - Whether upper bound is exclusive (defaults to false).
+   * @returns Current QueryBuilder for chaining.
+   */
   below(key: IDBValidKey, open = false): this {
     this.ast.range = IDBKeyRange.upperBound(key, open);
     return this;
   }
 
+  /**
+   * Sets the cursor traversal direction.
+   *
+   * @param dir - `"next"`, `"nextunique"`, `"prev"`, or `"prevunique"`.
+   * @returns Current QueryBuilder for chaining.
+   */
   direction(dir: CursorDirection): this {
     this.ast.direction = dir;
     return this;
   }
 
+  /**
+   * Appends an in-memory post-index JavaScript filter predicate.
+   *
+   * @param predicate - Synchronous boolean predicate receiving each item.
+   * @returns Current QueryBuilder for chaining.
+   */
   filter(predicate: QueryFilterPredicate<T>): this {
     this.ast.filterPredicate = predicate;
     return this;
   }
 
+  /**
+   * Skips the specified number of records using zero-allocation `cursor.advance()`.
+   *
+   * @param count - Number of records to skip.
+   * @returns Current QueryBuilder for chaining.
+   */
   offset(count: number): this {
     this.ast.offsetCount = count;
     return this;
   }
 
+  /**
+   * Limits the maximum number of items retrieved.
+   *
+   * @param count - Maximum number of items.
+   * @returns Current QueryBuilder for chaining.
+   */
   limit(count: number): this {
     this.ast.limitCount = count;
     return this;
   }
 
+  /**
+   * Returns a copy of the underlying query AST representation.
+   */
   getAST(): QueryAST<T> {
     return { ...this.ast };
   }
 
+  /**
+   * Executes the compiled query and resolves all matched records into an array.
+   * Automatically leverages the native fast-path `getAll()` when no in-memory filter or non-default direction is used.
+   *
+   * @returns Promise resolving to an array of matched records.
+   */
   async toArray(): Promise<T[]> {
     const results = await this.storage.cursor(this.ast);
 
@@ -89,6 +157,12 @@ export class QueryBuilder<T> {
     return results;
   }
 
+  /**
+   * Returns the count of matching records.
+   * Uses native high-speed `IDBIndex.count()` when no in-memory filter is attached.
+   *
+   * @returns Total count of matching records.
+   */
   async count(): Promise<number> {
     // If there's no filter, use native count for performance
     if (!this.ast.filterPredicate) {
@@ -100,6 +174,11 @@ export class QueryBuilder<T> {
     return results.length;
   }
 
+  /**
+   * Executes the query with `limit(1)` and returns the first matched record or `undefined`.
+   *
+   * @returns The first matching record, or `undefined` if none found.
+   */
   async first(): Promise<T | undefined> {
     this.ast.limitCount = 1;
     const results = await this.toArray();

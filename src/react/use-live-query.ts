@@ -6,18 +6,65 @@ import { hashQuery } from "../core/key-serializer";
 import type { LiveQueryOptions } from "../types/query";
 import type { QuerySnapshot } from "../core/l1-cache";
 
+/**
+ * Result returned by the {@link useLiveQuery} hook.
+ *
+ * @template T - The query result type (array or single value).
+ */
 export interface UseLiveQueryResult<T> {
+  /**
+   * The current synchronous query results.
+   * If unset and `options.initialData` was provided, returns `initialData`.
+   */
   data: T | undefined;
+
+  /**
+   * `true` during the initial query execution if no `initialData` was provided.
+   */
   isLoading: boolean;
+
+  /**
+   * `true` whenever an active asynchronous fetch is running in the background.
+   */
   isFetching: boolean;
+
+  /**
+   * Error caught during query execution, or `null` if healthy.
+   */
   error: Error | null;
+
+  /**
+   * Triggers an explicit re-fetch of the query against storage.
+   */
   refetch: () => Promise<void>;
 }
 
 /**
- * Subscribes to an arbitrary IndexedDB query or multi-store read.
- * Automatically re-renders with zero UI tearing via useSyncExternalStore
+ * Subscribes to an IndexedDB query or multi-store read.
+ *
+ * Automatically re-renders with zero UI tearing via `useSyncExternalStore`
  * only when the tracked key range or store mutates.
+ *
+ * @template T - The resolved query return type.
+ * @param queryFn - Function that returns a {@link QueryBuilder} or Promise of data.
+ * @param deps - Dependency array. Changes to dependencies trigger a query re-execution.
+ * @param options - Configuration options (`initialData`, `suspense`, `enabled`).
+ * @returns Object with `data`, `isLoading`, `isFetching`, `error`, and `refetch`.
+ *
+ * @example
+ * ```tsx
+ * import { useLiveQuery } from "use-idb";
+ *
+ * function CompletedTodos() {
+ *   const { data: todos = [], isLoading } = useLiveQuery(
+ *     (db) => db.query<Todo>("todos").where("completed").equals(1),
+ *     [],
+ *   );
+ *
+ *   if (isLoading) return <div>Loading...</div>;
+ *   return <ul>{todos.map((t) => <li key={t.id}>{t.title}</li>)}</ul>;
+ * }
+ * ```
  */
 export function useLiveQuery<T>(
   queryFn: (db: Engine) => QueryBuilder<T> | Promise<T>,
