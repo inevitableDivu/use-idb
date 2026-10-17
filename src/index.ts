@@ -14,7 +14,7 @@ export { useIDBStatus } from "./react/use-idb-status";
 
 // ── Core Engine & Factories ──
 export { Engine, createDatabase, getDatabase, getDefaultEngine } from "./core/engine";
-export type { EngineConfig } from "./core/engine";
+export type { EngineConfig, DatabaseInstance } from "./core/engine";
 export { QueryBuilder } from "./core/query-engine";
 export { L1Cache, DELETED_SENTINEL } from "./core/l1-cache";
 export type { QuerySnapshot, CacheEntry, L1CacheOptions } from "./core/l1-cache";
@@ -49,8 +49,18 @@ export type { SerializationHook } from "./adapters/middleware/serializer";
 
 // ── Domain Types ──
 export type {
+  StringKeyOf,
+  KeyPath,
   DatabaseSchema,
   StoreConfig,
+  StoreDefinition,
+  StoreInput,
+  DefaultKeyPath,
+  IndexInput,
+  IndexObjectConfig,
+  IndexesInputMap,
+  InferKeyFromPath,
+  InferIndexValue,
   IndexConfig,
   MigrationContext,
   DatabaseOptions,
@@ -58,11 +68,21 @@ export type {
   StoreValue,
   StoreKey,
   StoreIndexes,
+  StoreMap,
+  DatabaseConfig,
+  InferStoreItem,
+  InferStoreKey,
 } from "./types/schema";
+export { store } from "./types/schema";
 export type {
   QueryAST,
   CursorDirection,
   QueryFilterPredicate,
   LiveQueryOptions,
+  SortDirection,
+  QueryBuilder as QueryBuilderType,
+  WhereClause,
+  ResolveWhereValue,
+  ValidWhereField,
 } from "./types/query";
 export type { ConnectionState, StorageQuota, IDBStatusSnapshot } from "./types/status";

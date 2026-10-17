@@ -126,9 +126,9 @@ export function useIdb<T>(key: string, options?: UseIdbOptions<T>): UseIdbReturn
     if (entry.status === "idle") {
       engine.l1Cache.markPending(entry, [storeName]);
       engine
-        .get<T>(storeName, key)
+        .get(storeName, key)
         .then((val) => {
-          engine.l1Cache.resolve(entry, val);
+          engine.l1Cache.resolve(entry, val as T | undefined);
         })
         .catch((err) => {
           engine.l1Cache.reject(entry, err instanceof Error ? err : new Error(String(err)));

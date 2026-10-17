@@ -3,6 +3,7 @@ import { useDatabase } from "./context";
 import { Engine } from "../core/engine";
 import { QueryBuilder } from "../core/query-engine";
 import { hashQuery } from "../core/key-serializer";
+import type { StoreConfig } from "../types/schema";
 import type { LiveQueryOptions } from "../types/query";
 import type { QuerySnapshot } from "../core/l1-cache";
 
@@ -55,7 +56,7 @@ export interface UseLiveQueryResult<T> {
  * @returns Object with `data`, `isLoading`, `isFetching`, `error`, and `refetch`.
  */
 export function useLiveQuery<T>(
-  queryFn: (db: Engine) => QueryBuilder<T> | Promise<T>,
+  queryFn: (db: Engine) => QueryBuilder<any, any, any> | Promise<T>,
   deps: unknown[] = [],
   options?: LiveQueryOptions<T>,
   customEngine?: Engine,
@@ -76,41 +77,76 @@ export function useLiveQuery<T>(
   }, [deps]);
 
   // Inspect QueryBuilder metadata once per dependency change
-  const { queryAst, storeName } = useMemo(() => {
+  const { queryAst, storeNames } = useMemo(() => {
     try {
-      const result = queryFnRef.current(engine);
-      if (result instanceof QueryBuilder) {
-        const ast = result.getAST();
-        return { queryAst: ast, storeName: ast.storeName };
+      const queryBuilders: QueryBuilder<any, any, any>[] = [];
+      const metadataStorage = new Proxy(engine.storage, {
+        get(target, property, receiver) {
+          if (property === "cursor" || property === "getAll") {
+            return async () => [];
+          }
+          if (property === "get") return async () => undefined;
+          if (property === "count") return async () => 0;
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      const trackedEngine = new Proxy(engine, {
+        get(target, property, receiver) {
+          if (property === "query") {
+            return (name: string) => {
+              const builder = new QueryBuilder<Record<string, unknown>, unknown>(
+                metadataStorage,
+                name,
+                target.middlewarePipeline,
+                target.schema.stores[name] as StoreConfig<Record<string, unknown>>,
+              );
+              queryBuilders.push(builder);
+              return builder;
+            };
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      const result = queryFnRef.current(trackedEngine);
+      const builder = result instanceof QueryBuilder ? result : queryBuilders[0];
+      if (builder) {
+        const names = [...new Set(queryBuilders.map((queryBuilder) => queryBuilder.getAST().storeName))];
+        const ast = builder.getAST();
+        if (names.length > 1) {
+          ast.range = undefined;
+          ast.indexName = undefined;
+          ast.filterPredicate = undefined;
+        }
+        return { queryAst: ast, storeNames: names };
       }
     } catch {
       // Handled during fetch execution
     }
-    return { queryAst: undefined, storeName: "default" };
+    return { queryAst: undefined, storeNames: ["default"] };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, depsHash]);
 
   const queryHash = useMemo(() => {
     if (queryAst) {
-      return `query:${hashQuery(queryAst, options?.queryKey)}:${depsHash}`;
+      return `query:${hashQuery(queryAst, options?.queryKey)}:${storeNames.join(",")}:${depsHash}`;
     }
     return `custom-query:${options?.queryKey ?? ""}:${depsHash}`;
-  }, [queryAst, options?.queryKey, depsHash]);
+  }, [queryAst, options?.queryKey, depsHash, storeNames]);
 
   const entry = useMemo(
     () =>
       engine.l1Cache.getOrCreateEntry<T>(
         queryHash,
-        [storeName],
+        storeNames,
         queryAst?.range,
         queryAst?.indexName,
       ),
-    [engine, queryHash, storeName, queryAst],
+    [engine, queryHash, storeNames, queryAst],
   );
 
   const executeFetch = useCallback((): Promise<T> => {
     if (!enabled) return Promise.resolve(undefined as unknown as T);
-    engine.l1Cache.markPending(entry, [storeName]);
+    engine.l1Cache.markPending(entry, storeNames);
 
     const promise = (async () => {
       try {
@@ -138,7 +174,7 @@ export function useLiveQuery<T>(
 
     engine.l1Cache.setPromise(queryHash, promise);
     return promise;
-  }, [engine, entry, storeName, enabled, queryHash]);
+  }, [engine, entry, storeNames, enabled, queryHash]);
 
   useEffect(() => {
     if (entry.status === "idle" && enabled) {

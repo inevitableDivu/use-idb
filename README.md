@@ -5,7 +5,7 @@
 **Resilient, High-Performance Reactive IndexedDB State Engine for React 19 & TypeScript.**  
 *Zero external runtime dependencies • Pragmatic Hexagonal Core • Sub-3kB min+gzip*
 
-[![CI / Tests](https://img.shields.io/badge/tests-32%20passing-brightgreen?style=flat-square)](https://github.com/inevitableDivu/use-idb)
+[![CI / Tests](https://img.shields.io/badge/tests-35%20passing-brightgreen?style=flat-square)](https://github.com/inevitableDivu/use-idb)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8%20Strict-blue?style=flat-square)](https://www.typescriptlang.org/)
 [![React 19](https://img.shields.io/badge/React-19%20Concurrent%20Ready-61dafb?style=flat-square)](https://react.dev/)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success?style=flat-square)](https://github.com/inevitableDivu/use-idb)
@@ -35,7 +35,7 @@ Existing IndexedDB wrappers either act as raw Promise bridges (`idb`, `idb-keyva
 - **📦 Rich Zero-Dependency Serialization**: Native preservation of `Date`, `BigInt`, `Uint8Array`, `Map`, and `Set` across storage and encryption boundaries.
 - **🌐 Real-Time Cross-Tab Sync**: Synchronizes mutations instantly across browser tabs via strict schema-validated `BroadcastChannel` envelopes.
 - **🔒 WebLocks Upgrade Coordination**: Prevents multi-tab connection deadlocks and version upgrade blocks using `navigator.locks` exclusivity and graceful connection teardown.
-- **🎯 Strongly Typed Schema Hook Factory**: `createDatabaseHooks<TSchema>()` guarantees compile-time validation for store names, index paths, primary keys, and entity types.
+- **🎯 End-to-End Type Inference**: `store<T>()` carries model, primary-key, index, query, CRUD, and React hook types from the config literal.
 - **⏳ Native React 19 Suspense**: First-class render-phase promise throwing with zero flickering during query refetches.
 - **🪶 Ultra-Lightweight & Modular**: Subpath exports (`use-idb`, `use-idb/react`, `use-idb/core`) with `"sideEffects": false` for optimal tree-shaking (~2.0 kB min+gzip core).
 
@@ -48,7 +48,7 @@ Existing IndexedDB wrappers either act as raw Promise bridges (`idb`, `idb-keyva
 ```mermaid
 flowchart TD
     subgraph UI ["React 19 Application Layer"]
-        Factory["createDatabaseHooks<TSchema>()"]
+        Factory["createDatabaseHooks(db)"]
         Hooks["useRecord() • useLiveQuery() • useMutation() • useIDBStatus()"]
     end
 
@@ -109,12 +109,12 @@ function ThemeToggle() {
 
 ---
 
-### 2. Strongly Typed Schema & Hook Factory (Recommended)
+### 2. Inferred Store Definitions & Hook Factory (Recommended)
 
-Define your database schema once. Gain compile-time autocomplete and validation across all hooks:
+Declare each model once in the runtime config. Store names, model fields, keys, index values, query results, and bound React hooks are inferred from that declaration:
 
 ```tsx
-import { createDatabase, createDatabaseHooks, type DatabaseSchema, type StoreConfig } from "use-idb";
+import { createDatabase, createDatabaseHooks, store } from "use-idb";
 
 // 1. Define Entity Models
 export interface User {
@@ -125,35 +125,42 @@ export interface User {
   createdAt: Date;
 }
 
-// 2. Define Strongly Typed Schema
-export interface AppDatabaseSchema extends DatabaseSchema<{
-  users: StoreConfig<User, string>;
-}> {
-  name: "app-db";
-  version: 1;
-  stores: {
-    users: StoreConfig<User, string>;
-  };
-}
-
-// 3. Initialize Engine Instance
-export const db = createDatabase<AppDatabaseSchema>({
+// 2. Configure stores and initialize the database. `store<User>()` preserves
+//    the model fields, the inferred string key, and literal index names.
+export const db = createDatabase({
   name: "app-db",
   version: 1,
   stores: {
-    users: {
+    users: store<User>()({
       keyPath: "id",
       indexes: {
-        by_role: { keyPath: "role" },
+        by_role: "role",
+        by_email: { keyPath: "email", unique: true },
       },
-    },
+    }),
   },
 });
 
-// 4. Create Bound Type-Safe Hooks
-export const { useRecord, useLiveQuery, useMutation, useIDBStatus } = 
-  createDatabaseHooks<AppDatabaseSchema>(db);
+// 3. The database instance supplies all type information to its hooks.
+export const { useRecord, useLiveQuery, useMutation, useIDBStatus } = createDatabaseHooks(db);
 ```
+
+For a common single-field `id` key, the direct call form is also available:
+
+```ts
+products: store<Product>({
+  keyPath: "id",
+  indexes: { by_name: "name" },
+})
+```
+
+Use the curried form when you want exact literal index-name inference or a custom/compound key path:
+
+```ts
+memberships: store<Membership>()({ keyPath: ["organizationId", "memberId"] })
+```
+
+This is a breaking change from manually authored `DatabaseSchema` interfaces; update existing configs to use typed stores. The optional `db.from("users")`/`db.table("users")` accessor is not part of this API.
 
 ---
 
@@ -162,7 +169,7 @@ export const { useRecord, useLiveQuery, useMutation, useIDBStatus } =
 The core engine features a type-safe, fluent query builder that compiles down to native `IDBIndex`, `IDBKeyRange`, and zero-allocation `IDBCursor` advances.
 
 ```typescript
-const query = db.query<User>("users");
+const query = db.query("users");
 ```
 
 ### 1. Indexed Lookups & Key Ranges
@@ -170,26 +177,26 @@ Chain `.where(indexName)` with native key range operations:
 
 ```typescript
 // Exact key match on an index (IDBKeyRange.only)
-const admins = await db.query<User>("users")
+const admins = await db.query("users")
   .where("role")
   .equals("admin")
   .toArray();
 
 // Bounded range query (IDBKeyRange.bound)
 // between(lower, upper, lowerOpen?, upperOpen?)
-const youngAdults = await db.query<User>("users")
+const youngAdults = await db.query("users")
   .where("age")
   .between(18, 30)
   .toArray();
 
 // Open-ended lower bound (IDBKeyRange.lowerBound)
-const seniors = await db.query<User>("users")
+const seniors = await db.query("users")
   .where("age")
   .above(65)
   .toArray();
 
 // Open-ended upper bound (IDBKeyRange.upperBound)
-const minors = await db.query<User>("users")
+const minors = await db.query("users")
   .where("age")
   .below(18)
   .toArray();
@@ -200,14 +207,14 @@ Control direction using IndexedDB cursor modes:
 
 ```typescript
 // Traverse descending (reverse chronological order)
-const latestLogins = await db.query<User>("users")
+const latestLogins = await db.query("users")
   .where("lastLogin")
   .direction("prev")
   .limit(10)
   .toArray();
 
 // Retrieve distinct values using "nextunique" or "prevunique"
-const uniqueRoles = await db.query<User>("users")
+const uniqueRoles = await db.query("users")
   .where("role")
   .direction("nextunique")
   .toArray();
@@ -218,7 +225,7 @@ Avoid reading unused records into JavaScript memory. `offset(n)` uses native `cu
 
 ```typescript
 function getPage(pageNumber: number, pageSize: number = 20) {
-  return db.query<User>("users")
+  return db.query("users")
     .where("role")
     .equals("customer")
     .offset((pageNumber - 1) * pageSize)
@@ -233,13 +240,13 @@ function getPage(pageNumber: number, pageSize: number = 20) {
 
 ```typescript
 // Fast-path: Native IDB count (0ms overhead)
-const totalAdmins = await db.query<User>("users")
+const totalAdmins = await db.query("users")
   .where("role")
   .equals("admin")
   .count();
 
 // Post-cursor in-memory JavaScript filter
-const verifiedAdmins = await db.query<User>("users")
+const verifiedAdmins = await db.query("users")
   .where("role")
   .equals("admin")
   .filter((user) => user.email.endsWith("@company.com"))
@@ -250,7 +257,7 @@ const verifiedAdmins = await db.query<User>("users")
 Retrieves the first matching record or `undefined`:
 
 ```typescript
-const primaryAdmin = await db.query<User>("users")
+const primaryAdmin = await db.query("users")
   .where("role")
   .equals("admin")
   .first();
@@ -268,7 +275,7 @@ Synchronous read backed by L1 memory cache, optimistic write overlays, and parti
 
 ```tsx
 function UserCard({ userId }: { userId: string }) {
-  const { data: user, isLoading, isFetching, patch, update, remove } = useRecord("users", userId);
+  const { data: user, isLoading, isFetching, patch, set, remove } = useRecord("users", userId);
 
   if (isLoading) return <div>Loading user...</div>;
   if (!user) return <div>User not found</div>;
@@ -279,7 +286,7 @@ function UserCard({ userId }: { userId: string }) {
       {/* Shallow patch updates only specified keys */}
       <button onClick={() => patch({ role: "admin" })}>Promote to Admin</button>
       {/* Full update replaces record */}
-      <button onClick={() => update({ ...user, name: "New Name" })}>Rename</button>
+      <button onClick={() => set({ ...user, name: "New Name" })}>Rename</button>
       {/* Deletes record from IDB and cache */}
       <button onClick={() => remove()}>Delete User</button>
     </div>
@@ -297,7 +304,7 @@ function FilteredUserList({ minAge }: { minAge: number }) {
   const { data: users = [], isLoading, isFetching, refetch } = useLiveQuery(
     (engine) =>
       engine
-        .query<User>("users")
+        .query("users")
         .where("age")
         .above(minAge)
         .toArray(),
@@ -324,7 +331,7 @@ Eliminate loading boilerplate by enabling native React 19 Suspense contracts:
 ```tsx
 function SuspendedUserList() {
   const { data: users } = useLiveQuery(
-    (engine) => engine.query<User>("users").toArray(),
+    (engine) => engine.query("users").toArray(),
     [],
     { suspense: true }
   );
@@ -348,11 +355,15 @@ Execute concurrent mutations without transaction conflicts. Multiple writes insi
 
 ```tsx
 function BulkImportButton() {
-  const { put, bulkPut, deleteRecord, clearStore, transaction, isPending, error } = useMutation();
+  const { put, bulkPut, remove, clearStore, transaction, isPending, error } = useMutation("users");
 
   const handleImport = async (records: User[]) => {
     // Coalesced into non-blocking chunked writes
-    await bulkPut("users", records.map((user) => ({ key: user.id, value: user })));
+    await bulkPut(records.map((user) => ({ key: user.id, value: user })));
+  };
+
+  const handleDelete = async (userId: string) => {
+    await remove(userId);
   };
 
   const handleAtomicTransfer = async () => {

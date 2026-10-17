@@ -89,7 +89,7 @@ export interface UseRecordResult<T> {
  * @param customEngine - Optional engine instance override.
  * @returns Synchronous {@link UseRecordResult} interface.
  */
-export function useRecord<T = unknown>(
+export function useRecord<T extends object = Record<string, unknown>>(
   storeName: string,
   key: IDBValidKey | undefined,
   options?: UseRecordOptions<T>,
@@ -124,9 +124,9 @@ export function useRecord<T = unknown>(
       if (force || entry.status === "idle") {
         engine.l1Cache.markPending(entry, [storeName]);
         engine
-          .get<T>(storeName, key)
+          .get(storeName, key)
           .then((val) => {
-            engine.l1Cache.resolve(entry, val);
+            engine.l1Cache.resolve(entry, val as T | undefined);
           })
           .catch((err) => {
             engine.l1Cache.reject(entry, err instanceof Error ? err : new Error(String(err)));
@@ -178,7 +178,7 @@ export function useRecord<T = unknown>(
   const patch = useCallback(
     async (partialVal: Partial<T>) => {
       if (!isKeyDefined) throw new Error("Cannot patch record with undefined key");
-      const current = snapshot.data ?? (await engine.get<T>(storeName, key));
+      const current = snapshot.data ?? ((await engine.get(storeName, key)) as T | undefined);
       const next = { ...current, ...partialVal } as T;
       await engine.put(storeName, next, key, { optimistic });
     },
