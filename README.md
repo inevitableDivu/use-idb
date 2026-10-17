@@ -499,6 +499,26 @@ const encryption = createEncryptionMiddleware(
 
 ## 🧪 Rigorous Verification & Chaos Testing
 
+Run `pnpm release:check` before cutting a release to run typechecking, lint,
+tests, the package build, and formatting checks. Use `pnpm release:dry-run` to
+also preview the files included by `pnpm pack`.
+
+Label each merged feature PR with exactly one of `release:patch`,
+`release:minor`, or `release:major` to have automation open or update a version
+bump PR. Merging that version PR creates the matching `vMAJOR.MINOR.PATCH` tag
+and starts the [npm publish workflow](./.github/workflows/publish.yml), which
+verifies the tag against `package.json` before publishing. Create those three
+labels in GitHub first; PRs without a release label do not schedule a release.
+Generated release PRs use the
+[release checklist template](./.github/PULL_REQUEST_TEMPLATE/release.md).
+Configure a GitHub App with repository contents and pull-request write access,
+then add its ID and private key as the repository secrets
+`RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY`; the App token allows the
+release-PR merge event to start the tagging workflow.
+Before publishing, configure npm trusted publishing for this GitHub repository
+and the exact workflow file `.github/workflows/publish.yml`. The workflow
+publishes with provenance and does not require a long-lived npm token.
+
 - **32 Automated Tests** covering cryptographic transposition attacks, WebLocks upgrade exclusivity, zombie read eviction, optimistic rollback stacks, and React Suspense integration.
 - **Type-Aware Static Analysis** with `oxlint` and strict TypeScript compilation (`tsc --noEmit`).
 
