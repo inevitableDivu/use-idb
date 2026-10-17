@@ -30,15 +30,6 @@ jobs:
         with:
           ref: main
 
-      - name: Create GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-
       - name: Check out current version-bump PR branch
         id: existing
         run: |
@@ -69,53 +60,10 @@ jobs:
       - name: Open or update version bump PR
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ github.token }}
           base: main
           branch: automation/release-version
           delete-branch: true
           commit-message: "chore: prepare release v${{ steps.bump.outputs.version }}"
           title: "chore: release v${{ steps.bump.outputs.version }}"
           body-path: release-pr-body.md
-
-  tag-release:
-    name: Tag merged release PR
-    if: >-
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.base.ref == 'main' &&
-      startsWith(github.event.pull_request.title, 'chore: release v') &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: write
-
-    steps:
-      - name: Check out main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Create and push version tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          version="$(node -p 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).version')"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Refusing to tag invalid package version: $version" >&2
-            exit 1
-          fi
-          expected_title="chore: release v$version"
-          if [[ "$PR_TITLE" != "$expected_title" ]]; then
-            echo "Release PR title must be '$expected_title', got '$PR_TITLE'." >&2
-            exit 1
-          fi
-          tag="v$version"
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-            echo "Tag $tag already exists; refusing to overwrite it." >&2
-            exit 1
-          fi
-          git tag "$tag"
-          git push origin "$tag"
-          gh workflow run publish.yml --ref main -f tag="$tag"
