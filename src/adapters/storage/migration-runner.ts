@@ -3,15 +3,18 @@ import type { DatabaseSchema } from "../../types/schema";
 /**
  * Runs schema migrations inside an `onupgradeneeded` transaction.
  * Diffs existing stores/indexes against the schema and creates/deletes as needed,
- * then executes incremental migration callbacks for versions in (oldVersion, newVersion].
+ * then executes incremental migration callbacks synchronously for versions in (oldVersion, newVersion].
+ *
+ * CRITICAL: IndexedDB `versionchange` transactions automatically commit as soon as control yields
+ * to the browser event loop with no pending requests. Migrations MUST be completely synchronous IDB operations.
  */
-export async function runMigrations(
+export function runMigrations(
   db: IDBDatabase,
   tx: IDBTransaction,
   schema: DatabaseSchema,
   oldVersion: number,
   newVersion: number,
-): Promise<void> {
+): void {
   const existingStores = new Set(Array.from(db.objectStoreNames));
   const targetStores = new Set(Object.keys(schema.stores));
 
@@ -59,12 +62,20 @@ export async function runMigrations(
     }
   }
 
-  // Run incremental migration callbacks
+  // Run incremental migration callbacks synchronously
   if (schema.migrations) {
     for (let v = oldVersion + 1; v <= newVersion; v++) {
       const migrateFn = schema.migrations[v];
       if (migrateFn) {
-        await migrateFn({ db, transaction: tx, oldVersion, newVersion });
+        const result = migrateFn({ db, transaction: tx, oldVersion, newVersion }) as unknown;
+        if (result && typeof (result as Promise<unknown>).then === "function") {
+          console.error(
+            `[use-idb Critical Error] Migration v${v} returned a Promise. IndexedDB versionchange transactions auto-commit when microtask control yields to the event loop. Migrations must be synchronous IDB operations.`,
+          );
+          throw new Error(
+            `Migration for version ${v} returned a Promise. IndexedDB versionchange transactions must be strictly synchronous.`,
+          );
+        }
       }
     }
   }

@@ -158,8 +158,9 @@ export interface DatabaseSchema<
 
   /**
    * Step-by-step schema migrations indexed by target version number.
+   * Migrations MUST be synchronous IDB operations to prevent premature browser auto-commit.
    */
-  migrations?: Record<number, (ctx: MigrationContext) => void | Promise<void>>;
+  migrations?: Record<number, (ctx: MigrationContext) => void>;
 
   /**
    * Runtime engine tuning options.

@@ -1,13 +1,19 @@
 import type { ConnectionState, StorageQuota } from "../../types/status";
 import type { QueryAST } from "../../types/query";
 import type { IStoragePort, IStorageTransaction, StorageBatchOp } from "../../ports/storage.port";
-import { toKeyString } from "../../core/key-serializer";
+import { toKeyString, isValidKey } from "../../core/key-serializer";
 
-type StoreData = Map<string, unknown>;
+interface MemoryRecord {
+  key: IDBValidKey;
+  value: unknown;
+}
+
+type StoreData = Map<string, MemoryRecord>;
 
 /**
- * In-memory Map-based storage adapter implementing IStoragePort.
- * Used as fallback for SSR, incognito mode, or when IndexedDB is unavailable.
+ * In-memory Map-based storage adapter implementing {@link IStoragePort}.
+ * Used as high-fidelity fallback for SSR, incognito mode, or when IndexedDB is blocked.
+ * Implements complete key-range filtering and secondary index lookup.
  */
 export class MemoryStorageAdapter implements IStoragePort {
   private stores = new Map<string, StoreData>();
@@ -59,24 +65,81 @@ export class MemoryStorageAdapter implements IStoragePort {
 
   async get<T>(storeName: string, key: IDBValidKey): Promise<T | undefined> {
     const store = this.ensureStore(storeName);
-    return store.get(toKeyString(key)) as T | undefined;
+    const rec = store.get(toKeyString(key));
+    return rec ? (rec.value as T) : undefined;
+  }
+
+  private matchesRange(
+    itemKey: unknown,
+    range?: IDBKeyRange | IDBValidKey,
+  ): boolean {
+    if (range === undefined) return true;
+    if (isValidKey(range)) {
+      return toKeyString(itemKey) === toKeyString(range);
+    }
+    if (range instanceof IDBKeyRange) {
+      try {
+        return range.includes(itemKey as any);
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private extractIndexValue(record: unknown, indexName?: string): unknown {
+    if (!indexName || record === null || typeof record !== "object") return undefined;
+    const parts = indexName.split(".");
+    let current: unknown = record;
+    for (const part of parts) {
+      if (current === null || typeof current !== "object") return undefined;
+      current = (current as Record<string, unknown>)[part];
+    }
+    return current;
   }
 
   async getAll<T>(
     storeName: string,
-    _indexName?: string,
-    _range?: IDBKeyRange | IDBValidKey,
+    indexName?: string,
+    range?: IDBKeyRange | IDBValidKey,
     limit?: number,
   ): Promise<T[]> {
     const store = this.ensureStore(storeName);
-    const values = Array.from(store.values()) as T[];
-    return limit !== undefined ? values.slice(0, limit) : values;
+    const results: T[] = [];
+
+    for (const rec of store.values()) {
+      const compareTarget = indexName
+        ? this.extractIndexValue(rec.value, indexName)
+        : rec.key;
+
+      if (this.matchesRange(compareTarget, range)) {
+        results.push(rec.value as T);
+        if (limit !== undefined && results.length >= limit) {
+          break;
+        }
+      }
+    }
+
+    return results;
   }
 
   async put(storeName: string, value: unknown, key?: IDBValidKey): Promise<IDBValidKey> {
     const store = this.ensureStore(storeName);
-    const resolvedKey = key ?? this.nextKey(storeName);
-    store.set(toKeyString(resolvedKey), value);
+    let resolvedKey = key;
+
+    // Check if inline key exists in object
+    if (resolvedKey === undefined && value !== null && typeof value === "object" && "id" in value) {
+      const idVal = (value as Record<string, unknown>).id;
+      if (isValidKey(idVal)) {
+        resolvedKey = idVal;
+      }
+    }
+
+    if (resolvedKey === undefined) {
+      resolvedKey = this.nextKey(storeName);
+    }
+
+    store.set(toKeyString(resolvedKey), { key: resolvedKey, value });
     return resolvedKey;
   }
 
@@ -90,9 +153,17 @@ export class MemoryStorageAdapter implements IStoragePort {
     store.clear();
   }
 
-  async count(storeName: string, _range?: IDBKeyRange | IDBValidKey): Promise<number> {
+  async count(storeName: string, range?: IDBKeyRange | IDBValidKey): Promise<number> {
     const store = this.ensureStore(storeName);
-    return store.size;
+    if (range === undefined) return store.size;
+
+    let total = 0;
+    for (const rec of store.values()) {
+      if (this.matchesRange(rec.key, range)) {
+        total++;
+      }
+    }
+    return total;
   }
 
   async batch(storeName: string, ops: StorageBatchOp[]): Promise<(IDBValidKey | undefined)[]> {
@@ -116,7 +187,6 @@ export class MemoryStorageAdapter implements IStoragePort {
     _mode: "readonly" | "readwrite",
     fn: (tx: IStorageTransaction) => Promise<T>,
   ): Promise<T> {
-    // Memory adapter doesn't need real transactions; operations are synchronous on a single Map.
     const tx: IStorageTransaction = {
       get: <V>(storeName: string, key: IDBValidKey): Promise<V | undefined> =>
         this.get<V>(storeName, key),
@@ -130,29 +200,41 @@ export class MemoryStorageAdapter implements IStoragePort {
 
   async cursor<T>(ast: QueryAST<T>): Promise<T[]> {
     const store = this.ensureStore(ast.storeName);
-    let entries = Array.from(store.values()) as T[];
+    let matched: Array<{ key: IDBValidKey; value: T }> = [];
+
+    for (const rec of store.values()) {
+      const compareTarget = ast.indexName
+        ? this.extractIndexValue(rec.value, ast.indexName)
+        : rec.key;
+
+      if (this.matchesRange(compareTarget, ast.range)) {
+        matched.push({ key: rec.key, value: rec.value as T });
+      }
+    }
 
     // Apply direction
     if (ast.direction === "prev" || ast.direction === "prevunique") {
-      entries.reverse();
+      matched.reverse();
     }
 
-    // Apply filter predicate
+    let records = matched.map((m) => m.value);
+
+    // Apply in-memory JavaScript filter predicate
     if (ast.filterPredicate) {
-      entries = entries.filter(ast.filterPredicate);
+      records = records.filter(ast.filterPredicate);
     }
 
     // Apply offset
     if (ast.offsetCount > 0) {
-      entries = entries.slice(ast.offsetCount);
+      records = records.slice(ast.offsetCount);
     }
 
     // Apply limit
     if (ast.limitCount !== undefined) {
-      entries = entries.slice(0, ast.limitCount);
+      records = records.slice(0, ast.limitCount);
     }
 
-    return entries;
+    return records;
   }
 
   async getQuota(): Promise<StorageQuota> {
