@@ -22,6 +22,8 @@ appropriate for the changes included since the previous npm release.
 
 ## After merging
 
-Merging this PR creates the matching `vMAJOR.MINOR.PATCH` tag and starts the
-automated npm publish workflow. Confirm the workflow succeeds and the new
-version is visible on npm before announcing the release.
+After this release PR is merged, create and push the matching
+`vMAJOR.MINOR.PATCH` tag to start the automated npm publish workflow. For
+example, for version `1.2.3`, run `git tag v1.2.3 && git push origin v1.2.3`.
+Confirm the workflow succeeds and the new version is visible on npm before
+announcing the release.
