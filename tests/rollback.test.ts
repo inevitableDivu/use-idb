@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { L1Cache } from "../src";
+import { L1Cache, DELETED_SENTINEL } from "../src";
 
 describe("Optimistic Rollback", () => {
   it("rolls back optimistic overlay to previous state when transaction aborts", () => {
@@ -43,5 +43,28 @@ describe("Optimistic Rollback", () => {
 
     cache.resolve(entry, "value-2");
     expect(callCount).toBe(2);
+  });
+
+  it("renders record as deleted immediately during optimistic delete and restores on rollback", () => {
+    const cache = new L1Cache();
+    const entry = cache.getOrCreateEntry("record:users:u1", ["users"], "u1");
+
+    // Initial state: record exists
+    cache.resolve(entry, { id: "u1", name: "Bob" });
+    expect(entry.snapshot.data).toEqual({ id: "u1", name: "Bob" });
+
+    // Apply optimistic deletion overlay using DELETED_SENTINEL
+    const overlayKey = "overlay_del_1";
+    cache.setOptimistic(entry, DELETED_SENTINEL as any, overlayKey);
+
+    // Snapshot data must immediately be undefined (record appears deleted)
+    expect(entry.snapshot.data).toBeUndefined();
+    expect(entry.snapshot.isLoading).toBe(false);
+
+    // Rollback optimistic overlay
+    cache.rollbackOptimistic(entry, overlayKey);
+
+    // Restores original data
+    expect(entry.snapshot.data).toEqual({ id: "u1", name: "Bob" });
   });
 });

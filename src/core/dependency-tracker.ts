@@ -1,6 +1,6 @@
 import type { MutationEnvelope } from "../ports/sync.port";
 import type { CacheEntry } from "./l1-cache";
-import { toKeyString } from "./key-serializer";
+import { toKeyString, isValidKey } from "./key-serializer";
 
 /**
  * Granular dependency tracker that matches mutation envelopes
@@ -12,9 +12,13 @@ export class DependencyTracker {
    *
    * Matching rules:
    * 1. The entry must depend on the mutated store.
-   * 2. If operation is 'clear' or entry has no key dependency (full store query) → always invalidate.
-   * 3. If entry watches a specific key → only invalidate if that key is in affectedKeys.
-   * 4. If entry watches a key range → only invalidate if any affected key falls within the range.
+   * 2. If operation is 'clear' or 'force_release' → always invalidate.
+   * 3. Secondary index queries (entry.indexName !== undefined) → store-level invalidation fallback.
+   *    Guarantees correctness by invalidating whenever the store mutates, eliminating the primary
+   *    key vs index range bug without write-path extraction overhead.
+   * 4. If entry has no key dependency (full-store query) → always invalidate.
+   * 5. If entry watches a specific primary key → only invalidate if that key is in affectedKeys.
+   * 6. If entry watches a primary key range → only invalidate if any affected key falls within the range.
    */
   shouldInvalidate(entry: CacheEntry, envelope: MutationEnvelope): boolean {
     // Must depend on the same store
@@ -22,23 +26,29 @@ export class DependencyTracker {
       return false;
     }
 
-    // 'clear' always invalidates everything in the store
-    if (envelope.operation === "clear") {
+    // 'clear' and 'force_release' always invalidate everything in the store
+    if (envelope.operation === "clear" || envelope.operation === "force_release") {
       return true;
     }
 
-    // No key dependency means this is a full-store query → always invalidate
+    // 1. Secondary index queries: store-level fallback (Option A)
+    // Eliminates the bug where mutated primary keys were tested against index value ranges.
+    if (entry.indexName !== undefined || entry.indexDependency !== undefined) {
+      return true;
+    }
+
+    // 2. No key dependency means this is a full-store query → always invalidate
     if (entry.keyDependency === undefined) {
       return true;
     }
 
-    // Specific key dependency
+    // 3. Specific primary key dependency
     if (isValidKey(entry.keyDependency)) {
       const depKeyStr = toKeyString(entry.keyDependency);
       return envelope.affectedKeys.some((k) => toKeyString(k) === depKeyStr);
     }
 
-    // Key range dependency
+    // 4. Primary key range dependency
     if (entry.keyDependency instanceof IDBKeyRange) {
       const range = entry.keyDependency;
       return envelope.affectedKeys.some((k) => {
@@ -68,17 +78,4 @@ export class DependencyTracker {
     }
     return invalidated;
   }
-}
-
-function isValidKey(value: unknown): value is IDBValidKey {
-  if (value === null || value === undefined) return false;
-  const t = typeof value;
-  return (
-    t === "string" ||
-    (t === "number" && !Number.isNaN(value)) ||
-    value instanceof Date ||
-    value instanceof ArrayBuffer ||
-    ArrayBuffer.isView(value) ||
-    Array.isArray(value)
-  );
 }

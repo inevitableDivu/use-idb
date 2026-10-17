@@ -40,7 +40,7 @@ export interface QueryAST<T = unknown> {
   filterPredicate?: QueryFilterPredicate<T>;
 
   /**
-   * Number of items to skip (`cursor.advance()`).
+   * Number of items to skip.
    */
   offsetCount: number;
 
@@ -48,6 +48,16 @@ export interface QueryAST<T = unknown> {
    * Maximum number of items to return.
    */
   limitCount?: number;
+
+  /**
+   * Whether this is a `.count()` query.
+   */
+  isCount?: boolean;
+
+  /**
+   * Optional developer-supplied query key for deterministic cache indexing.
+   */
+  queryKey?: string;
 }
 
 /**
@@ -74,4 +84,9 @@ export interface LiveQueryOptions<T = unknown> {
    * @default true
    */
   enabled?: boolean;
+
+  /**
+   * Explicit cache query key to disambiguate dynamic filter predicates or queries.
+   */
+  queryKey?: string;
 }

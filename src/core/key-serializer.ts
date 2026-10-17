@@ -69,8 +69,9 @@ function stringifyRange(range?: IDBKeyRange | IDBValidKey): string {
 
 /**
  * Computes a deterministic query hash string for L1 cache lookup.
+ * Includes queryKey or filter predicate to eliminate cache collisions.
  */
-export function hashQuery<T>(ast: QueryAST<T>): string {
+export function hashQuery<T>(ast: QueryAST<T>, queryKey?: string): string {
   const parts = [
     ast.storeName,
     ast.indexName ?? "",
@@ -78,6 +79,8 @@ export function hashQuery<T>(ast: QueryAST<T>): string {
     ast.direction,
     String(ast.offsetCount),
     ast.limitCount !== undefined ? String(ast.limitCount) : "*",
+    ast.isCount ? "count" : "data",
+    queryKey ?? ast.queryKey ?? (ast.filterPredicate ? ast.filterPredicate.toString() : ""),
   ];
   return parts.join("|");
 }

@@ -1,36 +1,26 @@
 /**
- * L1 Synchronous Snapshot Cache for useSyncExternalStore integration.
+ * Immutable snapshot of a cache entry returned synchronously to React components.
  *
- * Provides:
- * - Pre-allocated frozen snapshot tuples with referential stability (Object.is)
- * - Per-store Lamport generation counters preventing stale async reads
- * - Optimistic overlay stack with instant rollback
- * - Configurable GC timer after zero active subscribers
+ * @template T - The stored entity or query result type.
  */
-
-/**
- * Frozen, referentially stable query snapshot consumed synchronously by `useSyncExternalStore`.
- *
- * @template T - The stored data type.
- */
-export interface QuerySnapshot<T = unknown> {
+export interface QuerySnapshot<T> {
   /**
-   * The active data value (incorporating any active optimistic overlays).
+   * The current synchronous data value, or `undefined` if not yet loaded.
    */
   readonly data: T | undefined;
 
   /**
-   * `true` on initial read before data has been loaded.
+   * `true` only during the initial load before any data or error is available.
    */
   readonly isLoading: boolean;
 
   /**
-   * `true` whenever an active asynchronous read is running.
+   * `true` whenever an active asynchronous fetch is in flight.
    */
   readonly isFetching: boolean;
 
   /**
-   * Error caught during execution, or `null` if healthy.
+   * Error encountered during the latest fetch, or `null` if healthy.
    */
   readonly error: Error | null;
 }
@@ -46,74 +36,22 @@ export type CacheEntryStatus = "idle" | "pending" | "resolved" | "error";
  * @template T - Stored data type.
  */
 export interface CacheEntry<T = unknown> {
-  /**
-   * Deterministic query hash.
-   */
   queryHash: string;
-
-  /**
-   * Set of object stores this query reads from.
-   */
   storeNames: Set<string>;
-
-  /**
-   * Optional key or key range dependency for fine-grained invalidation.
-   */
   keyDependency?: IDBValidKey | IDBKeyRange;
-
-  /**
-   * Optional index dependency name.
-   */
   indexDependency?: string;
-
-  /**
-   * Current lifecycle status.
-   */
+  indexName?: string;
   status: CacheEntryStatus;
-
-  /**
-   * Base resolved data from storage.
-   */
   data: T | undefined;
-
-  /**
-   * Optimistic overlay value before transaction commits.
-   */
-  optimisticData?: T;
-
-  /**
-   * Error if operation rejected.
-   */
+  optimisticData?: T | typeof DELETED_SENTINEL;
+  optimisticOverlays?: Map<string, unknown>;
+  retryCount?: number;
   error: Error | null;
-
-  /**
-   * Store generation counter value when read was initiated.
-   */
   generationAtStart: number;
-
-  /**
-   * Active promise used for React `<Suspense>` integration.
-   */
   promise?: Promise<T>;
-
-  /**
-   * Frozen snapshot returned synchronously to React components.
-   */
   snapshot: QuerySnapshot<T>;
-
-  /**
-   * Set of active subscriber listener callbacks.
-   */
   subscribers: Set<() => void>;
-
-  /**
-   * Active garbage collection timer running after zero subscribers remain.
-   */
   gcTimer?: ReturnType<typeof setTimeout>;
-
-  /**
-   * Background re-fetch callback triggered upon cache invalidation.
-   */
   fetcher?: () => Promise<unknown>;
 }
 
@@ -136,15 +74,29 @@ export interface L1CacheOptions {
   ttlMs: number;
 }
 
+/**
+ * Unique symbol indicating that a record has been optimistically deleted.
+ * Used internally to distinguish between "no optimistic overlay" (undefined)
+ * and "optimistically deleted" (DELETED_SENTINEL).
+ */
+export const DELETED_SENTINEL = Symbol("DELETED");
+
 const DEFAULT_OPTIONS: L1CacheOptions = {
   maxEntries: 1000,
   ttlMs: 60_000,
 };
 
 function createSnapshot<T>(entry: CacheEntry<T>): QuerySnapshot<T> {
+  let activeData: T | undefined = entry.data;
+  if (entry.optimisticData === DELETED_SENTINEL) {
+    activeData = undefined;
+  } else if (entry.optimisticData !== undefined) {
+    activeData = entry.optimisticData as T;
+  }
+
   return Object.freeze({
-    data: entry.optimisticData !== undefined ? entry.optimisticData : entry.data,
-    isLoading: entry.status === "pending" && entry.data === undefined,
+    data: activeData,
+    isLoading: entry.status === "pending" && activeData === undefined,
     isFetching: entry.status === "pending",
     error: entry.error,
   });
@@ -165,10 +117,7 @@ export class L1Cache {
   private readonly options: L1CacheOptions;
 
   constructor(options?: Partial<L1CacheOptions>) {
-    this.options = {
-      maxEntries: options?.maxEntries ?? DEFAULT_OPTIONS.maxEntries,
-      ttlMs: options?.ttlMs ?? DEFAULT_OPTIONS.ttlMs,
-    };
+    this.options = { ...DEFAULT_OPTIONS, ...options };
   }
 
   getGeneration(storeName: string): number {
@@ -181,6 +130,10 @@ export class L1Cache {
     return next;
   }
 
+  getEntry<T>(queryHash: string): CacheEntry<T> | undefined {
+    return this.entries.get(queryHash) as CacheEntry<T> | undefined;
+  }
+
   getOrCreateEntry<T>(
     queryHash: string,
     storeNames: string[],
@@ -189,71 +142,65 @@ export class L1Cache {
   ): CacheEntry<T> {
     let entry = this.entries.get(queryHash) as CacheEntry<T> | undefined;
 
-    if (entry) {
-      // Cancel GC timer if entry is being reused
-      if (entry.gcTimer !== undefined) {
-        clearTimeout(entry.gcTimer);
-        entry.gcTimer = undefined;
+    if (!entry) {
+      if (this.entries.size >= this.options.maxEntries) {
+        this.evictOldestWithoutSubscribers();
       }
-      return entry;
+
+      entry = {
+        queryHash,
+        storeNames: new Set(storeNames),
+        keyDependency,
+        indexDependency,
+        indexName: indexDependency,
+        status: "idle",
+        data: undefined,
+        optimisticData: undefined,
+        optimisticOverlays: new Map(),
+        retryCount: 0,
+        error: null,
+        generationAtStart: 0,
+        snapshot: Object.freeze({
+          data: undefined,
+          isLoading: false,
+          isFetching: false,
+          error: null,
+        }),
+        subscribers: new Set(),
+      };
+
+      this.entries.set(queryHash, entry as CacheEntry);
+    } else {
+      for (const s of storeNames) {
+        entry.storeNames.add(s);
+      }
+      if (keyDependency !== undefined) {
+        entry.keyDependency = keyDependency;
+      }
+      if (indexDependency !== undefined) {
+        entry.indexDependency = indexDependency;
+        entry.indexName = indexDependency;
+      }
     }
 
-    entry = {
-      queryHash,
-      storeNames: new Set(storeNames),
-      keyDependency,
-      indexDependency,
-      status: "idle",
-      data: undefined,
-      error: null,
-      generationAtStart: 0,
-      subscribers: new Set(),
-      snapshot: Object.freeze({
-        data: undefined,
-        isLoading: true,
-        isFetching: true,
-        error: null,
-      }),
-    };
-
-    this.entries.set(queryHash, entry as CacheEntry);
-    this.enforceMaxEntries();
     return entry;
   }
 
-  getEntry<T>(queryHash: string): CacheEntry<T> | undefined {
-    return this.entries.get(queryHash) as CacheEntry<T> | undefined;
-  }
-
-  /**
-   * Updates the snapshot of a cache entry and notifies subscribers
-   * ONLY if the snapshot has actually changed (referential stability).
-   */
-  updateEntrySnapshot<T>(entry: CacheEntry<T>): void {
-    const nextSnapshot = createSnapshot(entry);
-    if (entry.snapshot && snapshotsEqual(entry.snapshot, nextSnapshot)) {
-      return;
-    }
-    entry.snapshot = nextSnapshot;
-    for (const listener of entry.subscribers) {
-      listener();
-    }
-  }
-
-  /**
-   * Mark entry as pending (fetching).
-   * Tags the read with current store generation to detect stale reads.
-   */
   markPending<T>(entry: CacheEntry<T>, storeNames: string[]): void {
     entry.status = "pending";
-    // Record the maximum generation across all dependent stores
     entry.generationAtStart = Math.max(...storeNames.map((s) => this.getGeneration(s)));
     this.updateEntrySnapshot(entry);
+  }
+
+  startPending<T>(entry: CacheEntry<T>, storeNames: string[]): void {
+    this.markPending(entry, storeNames);
   }
 
   /**
    * Resolve a completed read. Discards the result if a mutation
    * incremented the generation since the read started (zombie read prevention).
+   *
+   * Automatically triggers a background re-fetch if a stale read is rejected.
    */
   resolve<T>(entry: CacheEntry<T>, data: T): boolean {
     const currentMaxGen = Math.max(
@@ -261,10 +208,23 @@ export class L1Cache {
     );
 
     if (currentMaxGen > entry.generationAtStart) {
-      // Stale read — discard result, keep entry in pending for re-fetch
+      // Stale read detected — auto re-fetch if fetcher is available
+      const retryCount = (entry.retryCount ?? 0) + 1;
+      entry.retryCount = retryCount;
+      if (entry.fetcher && retryCount <= 3) {
+        entry.generationAtStart = currentMaxGen;
+        entry.fetcher().catch((err) => {
+          this.reject(entry, err instanceof Error ? err : new Error(String(err)));
+        });
+      } else {
+        // Exceeded retries, mark resolved with current state
+        entry.status = "resolved";
+        this.updateEntrySnapshot(entry);
+      }
       return false;
     }
 
+    entry.retryCount = 0;
     entry.status = "resolved";
     entry.data = data;
     entry.error = null;
@@ -281,7 +241,7 @@ export class L1Cache {
   setPromise(queryHash: string, promise: Promise<unknown>): void {
     const entry = this.entries.get(queryHash);
     if (entry) {
-      entry.promise = promise;
+      entry.promise = promise as Promise<any>;
     }
   }
 
@@ -292,17 +252,30 @@ export class L1Cache {
   /**
    * Apply an optimistic overlay before the transaction commits.
    */
-  setOptimistic<T>(entry: CacheEntry<T>, data: T): void {
-    entry.optimisticData = data;
+  setOptimistic<T>(entry: CacheEntry<T>, data: T | typeof DELETED_SENTINEL, mutationId?: string): void {
+    if (mutationId) {
+      if (!entry.optimisticOverlays) {
+        entry.optimisticOverlays = new Map();
+      }
+      entry.optimisticOverlays.set(mutationId, data);
+    }
+    entry.optimisticData = data as any;
     this.updateEntrySnapshot(entry);
   }
 
   /**
    * Commit the optimistic overlay (transaction succeeded).
    */
-  commitOptimistic<T>(entry: CacheEntry<T>): void {
-    if (entry.optimisticData !== undefined) {
-      entry.data = entry.optimisticData;
+  commitOptimistic<T>(entry: CacheEntry<T>, mutationId?: string): void {
+    if (mutationId && entry.optimisticOverlays) {
+      entry.optimisticOverlays.delete(mutationId);
+    }
+    if (entry.optimisticData === DELETED_SENTINEL) {
+      entry.data = undefined;
+      entry.optimisticData = undefined;
+      this.updateEntrySnapshot(entry);
+    } else if (entry.optimisticData !== undefined) {
+      entry.data = entry.optimisticData as T;
       entry.optimisticData = undefined;
       this.updateEntrySnapshot(entry);
     }
@@ -311,14 +284,20 @@ export class L1Cache {
   /**
    * Rollback the optimistic overlay (transaction aborted).
    */
-  rollbackOptimistic<T>(entry: CacheEntry<T>): void {
+  rollbackOptimistic<T>(entry: CacheEntry<T>, mutationId?: string): void {
+    if (mutationId && entry.optimisticOverlays) {
+      entry.optimisticOverlays.delete(mutationId);
+      if (entry.optimisticOverlays.size > 0) {
+        const remaining = Array.from(entry.optimisticOverlays.values());
+        entry.optimisticData = remaining[remaining.length - 1] as any;
+        this.updateEntrySnapshot(entry);
+        return;
+      }
+    }
     entry.optimisticData = undefined;
     this.updateEntrySnapshot(entry);
   }
 
-  /**
-   * Subscribe to snapshot changes. Starts GC timer on last unsubscribe.
-   */
   subscribe(queryHash: string, listener: () => void, fetcher?: () => Promise<unknown>): () => void {
     const entry = this.entries.get(queryHash);
     if (!entry) return () => {};
@@ -335,54 +314,58 @@ export class L1Cache {
     return () => {
       entry.subscribers.delete(listener);
       if (entry.subscribers.size === 0) {
-        entry.fetcher = undefined;
-        entry.gcTimer = setTimeout(() => {
-          this.entries.delete(queryHash);
-        }, this.options.ttlMs);
+        this.scheduleGC(entry);
       }
     };
   }
 
-  /**
-   * Invalidate all cache entries that depend on the given store.
-   * Returns the list of invalidated query hashes for re-fetching.
-   */
-  invalidateByStore(storeName: string): string[] {
-    return this.invalidateMatching((entry) => entry.storeNames.has(storeName));
-  }
-
-  /**
-   * Invalidate cache entries matching a predicate.
-   * Active subscribers will automatically trigger their fetchers.
-   */
-  invalidateMatching(predicate: (entry: CacheEntry) => boolean): string[] {
-    const invalidated: string[] = [];
-    for (const [hash, entry] of this.entries) {
-      if (predicate(entry)) {
+  invalidateByStore(storeName: string): void {
+    for (const entry of this.entries.values()) {
+      if (entry.storeNames.has(storeName)) {
         entry.status = "idle";
-        invalidated.push(hash);
-        if (entry.subscribers.size > 0 && entry.fetcher) {
+        this.updateEntrySnapshot(entry);
+        if (entry.fetcher && entry.subscribers.size > 0) {
           entry.fetcher().catch(() => {});
         }
       }
     }
-    return invalidated;
   }
 
-  getEntries(): IterableIterator<CacheEntry> {
+  invalidateMatching(predicate: (entry: CacheEntry) => boolean): void {
+    for (const entry of this.entries.values()) {
+      if (predicate(entry)) {
+        entry.status = "idle";
+        this.updateEntrySnapshot(entry);
+        if (entry.fetcher && entry.subscribers.size > 0) {
+          entry.fetcher().catch(() => {});
+        }
+      }
+    }
+  }
+
+  invalidateByQueryHash(queryHash: string): void {
+    const entry = this.entries.get(queryHash);
+    if (entry) {
+      entry.status = "idle";
+      this.updateEntrySnapshot(entry);
+      if (entry.fetcher && entry.subscribers.size > 0) {
+        entry.fetcher().catch(() => {});
+      }
+    }
+  }
+
+  getAllEntries(): Iterable<CacheEntry> {
     return this.entries.values();
   }
 
-  private enforceMaxEntries(): void {
-    if (this.entries.size <= this.options.maxEntries) return;
-    // Evict oldest entries without active subscribers
-    for (const [hash, entry] of this.entries) {
-      if (entry.subscribers.size === 0) {
-        if (entry.gcTimer !== undefined) {
-          clearTimeout(entry.gcTimer);
-        }
-        this.entries.delete(hash);
-        if (this.entries.size <= this.options.maxEntries) return;
+  updateEntrySnapshot<T>(entry: CacheEntry<T>): void {
+    const prev = entry.snapshot;
+    const next = createSnapshot(entry);
+
+    if (!snapshotsEqual(prev, next)) {
+      entry.snapshot = next;
+      for (const listener of entry.subscribers) {
+        listener();
       }
     }
   }
@@ -395,5 +378,30 @@ export class L1Cache {
     }
     this.entries.clear();
     this.storeGenerations.clear();
+  }
+
+  private scheduleGC(entry: CacheEntry): void {
+    if (this.options.ttlMs <= 0) {
+      this.entries.delete(entry.queryHash);
+      return;
+    }
+
+    entry.gcTimer = setTimeout(() => {
+      if (entry.subscribers.size === 0) {
+        this.entries.delete(entry.queryHash);
+      }
+    }, this.options.ttlMs);
+  }
+
+  private evictOldestWithoutSubscribers(): void {
+    for (const [hash, entry] of this.entries.entries()) {
+      if (entry.subscribers.size === 0) {
+        if (entry.gcTimer !== undefined) {
+          clearTimeout(entry.gcTimer);
+        }
+        this.entries.delete(hash);
+        return;
+      }
+    }
   }
 }

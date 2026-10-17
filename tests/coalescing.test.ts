@@ -67,4 +67,54 @@ describe("Microtask Write Coalescer", () => {
     const record = await db.get("items", "temp-key");
     expect(record).toBeUndefined();
   });
+
+  it("does not hang surviving operations when an intermediate middleware operation rejects", async () => {
+    const failingMiddleware = {
+      name: "failing-middleware",
+      async beforeWrite(ctx: any) {
+        if (ctx.key === "poison_pill") {
+          throw new Error("Validation failure: poison pill rejected");
+        }
+        return ctx.value;
+      },
+    };
+
+    const db = createDatabase(
+      {
+        name: "test-middleware-isolation-db",
+        version: 1,
+        stores: { items: { keyPath: "id" } },
+      },
+      {
+        middlewares: [failingMiddleware],
+      },
+    );
+
+    // Queue 3 writes concurrently within the same microtask:
+    // op1: valid, op2: poison pill, op3: valid
+    const p1 = db.put("items", { id: "item_1", name: "First" }, "item_1");
+    const p2 = db.put("items", { id: "poison_pill", name: "Poison" }, "poison_pill");
+    const p3 = db.put("items", { id: "item_3", name: "Third" }, "item_3");
+
+    const [res1, res2, res3] = await Promise.allSettled([p1, p2, p3]);
+
+    // op1 must succeed
+    expect(res1.status).toBe("fulfilled");
+    // op2 must reject with the middleware error
+    expect(res2.status).toBe("rejected");
+    if (res2.status === "rejected") {
+      expect(res2.reason.message).toContain("poison pill rejected");
+    }
+    // op3 must NOT hang and must succeed
+    expect(res3.status).toBe("fulfilled");
+
+    // Verify that item_1 and item_3 are written, and poison_pill is not
+    const item1 = await db.get("items", "item_1");
+    const poison = await db.get("items", "poison_pill");
+    const item3 = await db.get("items", "item_3");
+
+    expect(item1).toEqual({ id: "item_1", name: "First" });
+    expect(poison).toBeUndefined();
+    expect(item3).toEqual({ id: "item_3", name: "Third" });
+  });
 });

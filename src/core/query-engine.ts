@@ -158,12 +158,21 @@ export class QueryBuilder<T> {
   }
 
   /**
+   * Configures the query builder to compile as a count query.
+   */
+  asCount(): this {
+    this.ast.isCount = true;
+    return this;
+  }
+
+  /**
    * Returns the count of matching records.
    * Uses native high-speed `IDBIndex.count()` when no in-memory filter is attached.
    *
    * @returns Total count of matching records.
    */
   async count(): Promise<number> {
+    this.ast.isCount = true;
     // If there's no filter, use native count for performance
     if (!this.ast.filterPredicate) {
       const range = this.ast.range instanceof IDBKeyRange ? this.ast.range : undefined;
