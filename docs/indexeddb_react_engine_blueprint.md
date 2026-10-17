@@ -1,6 +1,6 @@
-# `reactive-idb` — Enterprise-Grade IndexedDB Engine for React
+# `reactive-idb` — Production-Grade IndexedDB Engine for React
 
-**Master Architecture, Edge-Case Mitigation & Vibe-Coding Implementation Blueprint**
+**Master Architecture, Edge-Case Mitigation & Implementation Blueprint**
 
 ---
 
@@ -12,7 +12,7 @@
 
 1. **Zero UI Tearing & 0ms Reads:** Synchronous reads via an L1 In-Memory Query Cache with structural sharing and Lamport generation counters.
 2. **Microtask Write Coalescing:** Automatically batches concurrent writes across components within the same tick into a single atomic `IDBTransaction` (10x–50x write throughput).
-3. **Self-Healing Connection State Machine:** Handles multi-tab `versionchange` deadlocks, Safari background tab disconnects (`InvalidStateError`), and enterprise storage policy blocks.
+3. **Self-Healing Connection State Machine:** Handles multi-tab `versionchange` deadlocks, Safari background tab disconnects (`InvalidStateError`), and browser storage policy blocks.
 4. **Granular Cross-Tab Synchronization:** Key-range and index-aware `BroadcastChannel` invalidation paired with Web Locks API (`navigator.locks`) for safe migrations.
 5. **Pluggable Middleware & Graceful Degradation:** Built-in support for field-level encryption (WebCrypto), schema validation, and automatic fallback to an In-Memory Adapter when running in restricted/incognito environments or SSR.
 
@@ -311,7 +311,7 @@ db.query("users")
 
 ### 4.7 Middleware Pipeline (`src/middleware/pipeline.ts`)
 
-Enterprise applications require audit logging, runtime validation, and encryption at rest.
+Production applications require audit logging, runtime validation, and encryption at rest.
 
 ```typescript
 export interface IDBMiddleware<S extends DatabaseSchema<any>> {
@@ -413,7 +413,7 @@ const {
 
 ### 5.5 `useIDBStatus` (`src/react/use-idb-status.ts`)
 
-Exposes operational telemetry for enterprise observability and recovery UIs.
+Exposes operational telemetry for system observability and recovery UIs.
 
 ```typescript
 export interface IDBStatusSnapshot {

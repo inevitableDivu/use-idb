@@ -2,7 +2,7 @@
 
 # ⚡ use-idb
 
-**Enterprise-Grade, Reactive IndexedDB State Engine for React 19 & TypeScript.**  
+**Resilient, High-Performance Reactive IndexedDB State Engine for React 19 & TypeScript.**  
 *Zero external runtime dependencies • Pragmatic Hexagonal Core • Sub-3kB min+gzip*
 
 [![CI / Tests](https://img.shields.io/badge/tests-32%20passing-brightgreen?style=flat-square)](https://github.com/inevitableDivu/use-idb)
@@ -12,7 +12,7 @@
 [![Bundle Size](https://img.shields.io/badge/bundle%20size-~2.0%20kB%20min%2Bgzip-orange?style=flat-square)](https://bundlephobia.com)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-[Features](#-key-features) • [Architecture](#-architecture) • [Getting Started](#-getting-started) • [API Guide](#-api-guide) • [Security & Encryption](#-enterprise-security--encryption) • [Benchmarks](#-performance-guarantees)
+[Features](#-key-features) • [Architecture](#-architecture) • [Getting Started](#-getting-started) • [API Guide](#-api-guide) • [Security & Encryption](#-security--field-level-encryption) • [Benchmarks](#-performance-guarantees)
 
 </div>
 
@@ -109,7 +109,7 @@ function ThemeToggle() {
 
 ---
 
-### 2. Enterprise Schema & Type-Safe Factory (Recommended)
+### 2. Strongly Typed Schema & Hook Factory (Recommended)
 
 Define your database schema once. Gain compile-time autocomplete and validation across all hooks:
 
@@ -129,7 +129,7 @@ export interface User {
 export interface AppDatabaseSchema extends DatabaseSchema<{
   users: StoreConfig<User, string>;
 }> {
-  name: "enterprise-app-db";
+  name: "app-db";
   version: 1;
   stores: {
     users: StoreConfig<User, string>;
@@ -138,7 +138,7 @@ export interface AppDatabaseSchema extends DatabaseSchema<{
 
 // 3. Initialize Engine Instance
 export const db = createDatabase<AppDatabaseSchema>({
-  name: "enterprise-app-db",
+  name: "app-db",
   version: 1,
   stores: {
     users: {
@@ -258,7 +258,7 @@ function BulkImportButton() {
 
 ---
 
-## 🔐 Enterprise Security & Encryption
+## 🔐 Security & Field-Level Encryption
 
 `use-idb` provides field-level AES-GCM hardware-accelerated encryption using WebCrypto with zero runtime dependencies.
 

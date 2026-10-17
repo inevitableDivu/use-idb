@@ -1,7 +1,7 @@
 {
   "name": "use-idb",
   "version": "0.1.0",
-  "description": "Zero-dependency, enterprise-grade IndexedDB reactive state engine for React 19 & TypeScript. Features microtask write coalescing, AES-GCM (NIST AAD) encryption, cross-tab synchronization, and full Suspense support.",
+  "description": "Zero-dependency, high-performance IndexedDB reactive state engine for React 19 & TypeScript. Features microtask write coalescing, AES-GCM (NIST AAD) encryption, cross-tab synchronization, and full Suspense support.",
   "keywords": [
     "indexeddb",
     "react",
