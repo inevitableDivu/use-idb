@@ -1,6 +1,6 @@
 {
   "name": "@inevitable_divu/use-idb",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Zero-dependency, high-performance IndexedDB reactive state engine for React 19 & TypeScript. Features microtask write coalescing, AES-GCM (NIST AAD) encryption, cross-tab synchronization, and full Suspense support.",
   "keywords": [
     "aes-gcm",
