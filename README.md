@@ -12,7 +12,7 @@
 [![Bundle Size](https://img.shields.io/badge/bundle%20size-~2.0%20kB%20min%2Bgzip-orange?style=flat-square)](https://bundlephobia.com)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-[Features](#-key-features) • [Architecture](#-architecture) • [Getting Started](#-getting-started) • [API Guide](#-api-guide) • [Security & Encryption](#-security--field-level-encryption) • [Benchmarks](#-performance-guarantees)
+[Features](#-key-features) • [Architecture](#-architecture) • [Getting Started](#-getting-started) • [Fluent Query Engine](#-fluent-query-engine-enginequery) • [React Hooks API](#-react-hooks-api) • [Security & Encryption](#-security--field-level-encryption) • [Benchmarks](#-performance-guarantees)
 
 </div>
 
@@ -157,15 +157,118 @@ export const { useRecord, useLiveQuery, useMutation, useIDBStatus } =
 
 ---
 
-## 📖 API Guide
+## 🔍 Fluent Query Engine (`engine.query`)
 
-### Reactive Single Record (`useRecord`)
+The core engine features a type-safe, fluent query builder that compiles down to native `IDBIndex`, `IDBKeyRange`, and zero-allocation `IDBCursor` advances.
+
+```typescript
+const query = db.query<User>("users");
+```
+
+### 1. Indexed Lookups & Key Ranges
+Chain `.where(indexName)` with native key range operations:
+
+```typescript
+// Exact key match on an index (IDBKeyRange.only)
+const admins = await db.query<User>("users")
+  .where("role")
+  .equals("admin")
+  .toArray();
+
+// Bounded range query (IDBKeyRange.bound)
+// between(lower, upper, lowerOpen?, upperOpen?)
+const youngAdults = await db.query<User>("users")
+  .where("age")
+  .between(18, 30)
+  .toArray();
+
+// Open-ended lower bound (IDBKeyRange.lowerBound)
+const seniors = await db.query<User>("users")
+  .where("age")
+  .above(65)
+  .toArray();
+
+// Open-ended upper bound (IDBKeyRange.upperBound)
+const minors = await db.query<User>("users")
+  .where("age")
+  .below(18)
+  .toArray();
+```
+
+### 2. Cursor Sorting, Ordering & Unique Keys
+Control direction using IndexedDB cursor modes:
+
+```typescript
+// Traverse descending (reverse chronological order)
+const latestLogins = await db.query<User>("users")
+  .where("lastLogin")
+  .direction("prev")
+  .limit(10)
+  .toArray();
+
+// Retrieve distinct values using "nextunique" or "prevunique"
+const uniqueRoles = await db.query<User>("users")
+  .where("role")
+  .direction("nextunique")
+  .toArray();
+```
+
+### 3. Pagination with Zero-Allocation Skip (`offset` & `limit`)
+Avoid reading unused records into JavaScript memory. `offset(n)` uses native `cursor.advance(n)` to skip directly to the target record before fetching:
+
+```typescript
+function getPage(pageNumber: number, pageSize: number = 20) {
+  return db.query<User>("users")
+    .where("role")
+    .equals("customer")
+    .offset((pageNumber - 1) * pageSize)
+    .limit(pageSize)
+    .toArray();
+}
+```
+
+### 4. High-Speed Native Counts vs. Filtered Counts
+- When no JavaScript filter is applied, `.count()` automatically uses native `IDBIndex.count()` or `IDBObjectStore.count()` without iterating over records or allocating memory.
+- When an in-memory `.filter()` is applied, it streams records through the predicate:
+
+```typescript
+// Fast-path: Native IDB count (0ms overhead)
+const totalAdmins = await db.query<User>("users")
+  .where("role")
+  .equals("admin")
+  .count();
+
+// Post-cursor in-memory JavaScript filter
+const verifiedAdmins = await db.query<User>("users")
+  .where("role")
+  .equals("admin")
+  .filter((user) => user.email.endsWith("@company.com"))
+  .count();
+```
+
+### 5. Fetch Single Match (`first()`)
+Retrieves the first matching record or `undefined`:
+
+```typescript
+const primaryAdmin = await db.query<User>("users")
+  .where("role")
+  .equals("admin")
+  .first();
+```
+
+---
+
+## 📖 React Hooks API
+
+`use-idb` provides both zero-config standalone hooks and factory-generated schema-bound hooks.
+
+### 1. Single Record Management (`useRecord`)
 
 Synchronous read backed by L1 memory cache, optimistic write overlays, and partial shallow patches:
 
 ```tsx
 function UserCard({ userId }: { userId: string }) {
-  const { data: user, isLoading, patch, remove } = useRecord("users", userId);
+  const { data: user, isLoading, isFetching, patch, update, remove } = useRecord("users", userId);
 
   if (isLoading) return <div>Loading user...</div>;
   if (!user) return <div>User not found</div>;
@@ -173,40 +276,50 @@ function UserCard({ userId }: { userId: string }) {
   return (
     <div>
       <h3>{user.name} ({user.role})</h3>
+      {/* Shallow patch updates only specified keys */}
       <button onClick={() => patch({ role: "admin" })}>Promote to Admin</button>
+      {/* Full update replaces record */}
+      <button onClick={() => update({ ...user, name: "New Name" })}>Rename</button>
+      {/* Deletes record from IDB and cache */}
       <button onClick={() => remove()}>Delete User</button>
     </div>
   );
 }
 ```
 
-### Reactive Live Queries (`useLiveQuery`)
+### 2. Auto-Subscribing Queries (`useLiveQuery`)
 
-Auto-subscribing live queries compiled with cursor streams, in-memory filters, or native fast-path `.count()`:
+Live queries track dependencies automatically. Whenever matching keys or stores mutate (locally or in another browser tab), `useSyncExternalStore` triggers an instant, tear-free re-render:
 
 ```tsx
-function AdminUserList() {
-  // Automatically re-renders whenever matching records in 'users' change
-  const { data: admins = [], isLoading } = useLiveQuery((engine) =>
-    engine
-      .query<User>("users")
-      .where("role", "admin")
-      .toArray()
+function FilteredUserList({ minAge }: { minAge: number }) {
+  // Pass dependency array to re-run query when parameters change
+  const { data: users = [], isLoading, isFetching, refetch } = useLiveQuery(
+    (engine) =>
+      engine
+        .query<User>("users")
+        .where("age")
+        .above(minAge)
+        .toArray(),
+    [minAge]
   );
 
   return (
-    <ul>
-      {admins.map((admin) => (
-        <li key={admin.id}>{admin.name} ({admin.email})</li>
-      ))}
-    </ul>
+    <div>
+      <button onClick={() => refetch()}>Force Refresh</button>
+      <ul>
+        {users.map((u) => (
+          <li key={u.id}>{u.name} — Age {u.age}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 ```
 
-### React 19 `<Suspense>` Mode
+### 3. React 19 `<Suspense>` Mode
 
-Eliminate loading state boilerplate by enabling native React 19 Suspense:
+Eliminate loading boilerplate by enabling native React 19 Suspense contracts:
 
 ```tsx
 function SuspendedUserList() {
@@ -217,25 +330,25 @@ function SuspendedUserList() {
   );
 
   return (
-    <div>
-      {users.map((u) => <p key={u.id}>{u.name}</p>)}
-    </div>
+    <ul>
+      {users.map((u) => <li key={u.id}>{u.name}</li>)}
+    </ul>
   );
 }
 
-// In your view:
+// In parent tree:
 <Suspense fallback={<SkeletonLoader />}>
   <SuspendedUserList />
 </Suspense>
 ```
 
-### Batched Mutations & Atomic Transactions (`useMutation`)
+### 4. Mutations & Cross-Store Atomic Transactions (`useMutation`)
 
-Execute concurrent mutations without transaction conflicts:
+Execute concurrent mutations without transaction conflicts. Multiple writes inside the same tick are automatically coalesced:
 
 ```tsx
 function BulkImportButton() {
-  const { bulkPut, transaction, isPending } = useMutation();
+  const { put, bulkPut, deleteRecord, clearStore, transaction, isPending, error } = useMutation();
 
   const handleImport = async (records: User[]) => {
     // Coalesced into non-blocking chunked writes
@@ -243,8 +356,8 @@ function BulkImportButton() {
   };
 
   const handleAtomicTransfer = async () => {
+    // Cross-store atomic ACID transaction with rollback on throw
     await transaction(["users", "audit_logs"], "readwrite", async (tx) => {
-      // Guaranteed atomic execution across stores
       const user = await tx.get<User>("users", "u_1");
       if (user) {
         await tx.put("audit_logs", { event: "MODIFIED", user: user.id, at: Date.now() });
@@ -252,7 +365,67 @@ function BulkImportButton() {
     });
   };
 
-  return <button disabled={isPending} onClick={handleAtomicTransfer}>Run</button>;
+  return (
+    <div>
+      {error && <p className="error">Mutation failed: {error.message}</p>}
+      <button disabled={isPending} onClick={handleAtomicTransfer}>
+        {isPending ? "Executing..." : "Run Atomic Transfer"}
+      </button>
+    </div>
+  );
+}
+```
+
+### 5. Telemetry & Connection Lifecycle (`useIDBStatus`)
+
+Exposes real-time connection state, storage quota, and graceful downgrade detection (e.g. private browsing mode):
+
+```tsx
+function StorageTelemetryBanner() {
+  const {
+    connectionState,           // "CONNECTING" | "OPEN" | "CLOSING" | "CLOSED" | "BLOCKED" | "CORRUPTED"
+    isFallbackMode,            // true if running on in-memory storage fallback
+    isUpgradeBlocked,          // true if another tab is blocking schema upgrade
+    requiresReloadForUpgrade,  // true if another tab upgraded schema and connection was released
+    quota,                     // { usageBytes, quotaBytes, percentUsed, isPersisted }
+    reconnect,                 // recovery callback to cleanly re-establish connection
+  } = useIDBStatus();
+
+  return (
+    <aside>
+      <span>Status: {connectionState}</span>
+      {isFallbackMode && <span>⚠️ Private mode: in-memory fallback active</span>}
+      {isUpgradeBlocked && <span>⚠️ Please close other tabs to complete database upgrade</span>}
+      {requiresReloadForUpgrade && (
+        <button onClick={() => window.location.reload()}>Reload App</button>
+      )}
+      {quota.percentUsed != null && (
+        <span>Storage: {quota.percentUsed.toFixed(1)}% used</span>
+      )}
+    </aside>
+  );
+}
+```
+
+### 6. React Context Architecture (`IndexedDBProvider`)
+
+Optionally inject a shared engine instance throughout your component tree:
+
+```tsx
+import { IndexedDBProvider, createDatabase } from "use-idb";
+
+const db = createDatabase({
+  name: "custom-db",
+  version: 1,
+  stores: { items: { keyPath: "id" } },
+});
+
+export function App() {
+  return (
+    <IndexedDBProvider client={db}>
+      <YourApplication />
+    </IndexedDBProvider>
+  );
 }
 ```
 
