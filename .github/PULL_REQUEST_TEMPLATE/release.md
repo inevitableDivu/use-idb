@@ -1,19 +1,19 @@
 ## Release summary
 
-This PR is the release-version PR. Automation has upversioned `package.json`
-from the release label on the merged feature PR. Review the changes included
-since the previous npm release and confirm that this version bump is
-appropriate.
+This PR prepares a new npm release. Confirm that the selected version bump is
+appropriate for the changes included since the previous npm release.
 
 - Proposed version: verify the `package.json` version matches the `chore: release vX.Y.Z` PR title
 - Release type: exactly one of `release:patch`, `release:minor`, or `release:major`
+- Breaking changes: call out any API migration users need to make
 - User-facing changes: add or confirm a concise summary
 
 ## Pre-publish checklist
 
-- [ ] The source feature PR has the correct release label; automation applied that bump to `package.json`.
+- [ ] The version bump is intentional and appropriate for the included changes.
 - [ ] The version in `package.json` matches the release PR title.
 - [ ] The release level is appropriate for the included changes.
+- [ ] Breaking changes are documented and use an appropriate major-version bump.
 - [ ] User-facing changes and migration notes are documented.
 - [ ] `pnpm release:check` passes.
 - [ ] `pnpm pack --dry-run` contains the expected package files.
