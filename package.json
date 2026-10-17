@@ -1,15 +1,34 @@
 {
   "name": "use-idb",
   "version": "0.1.0",
-  "description": "A lightweight, type-safe React hook wrapper for IndexedDB",
+  "description": "Zero-dependency, enterprise-grade IndexedDB reactive state engine for React 19 & TypeScript. Features microtask write coalescing, AES-GCM (NIST AAD) encryption, cross-tab synchronization, and full Suspense support.",
   "keywords": [
-    "hook",
-    "idb",
     "indexeddb",
     "react",
+    "react-19",
+    "offline-first",
+    "local-first",
+    "state-management",
     "storage",
-    "typescript"
+    "cache",
+    "crypto",
+    "aes-gcm",
+    "zero-dependency",
+    "typescript",
+    "hooks",
+    "suspense",
+    "broadcast-channel",
+    "concurrent-react"
   ],
+  "author": "Divyansh Pandey <pandeydivyansh070501@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inevitableDivu/use-idb.git"
+  },
+  "homepage": "https://github.com/inevitableDivu/use-idb#readme",
+  "bugs": {
+    "url": "https://github.com/inevitableDivu/use-idb/issues"
+  },
   "license": "MIT",
   "files": [
     "dist"
