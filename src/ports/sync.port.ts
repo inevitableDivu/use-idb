@@ -20,10 +20,10 @@ export interface MutationEnvelope {
   /**
    * Type of mutation applied.
    */
-  operation: "put" | "delete" | "clear" | "bulk";
+  operation: "put" | "delete" | "clear" | "bulk" | "force_release";
 
   /**
-   * Array of primary keys affected by the mutation (empty for "clear").
+   * Array of primary keys affected by the mutation (empty for "clear" or "force_release").
    */
   affectedKeys: IDBValidKey[];
 }

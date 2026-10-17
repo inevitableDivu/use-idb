@@ -18,21 +18,22 @@ export class MiddlewarePipeline {
     storeName: string,
     operation: "put" | "add",
     value: unknown,
+    key?: IDBValidKey,
   ): Promise<unknown> {
     let current = value;
     for (const mw of this.middlewares) {
       if (mw.beforeWrite) {
-        current = await mw.beforeWrite({ storeName, operation, value: current });
+        current = await mw.beforeWrite({ storeName, operation, value: current, key });
       }
     }
     return current;
   }
 
-  async runAfterRead(storeName: string, value: unknown): Promise<unknown> {
+  async runAfterRead(storeName: string, value: unknown, key?: IDBValidKey): Promise<unknown> {
     let current = value;
     for (const mw of this.middlewares) {
       if (mw.afterRead) {
-        current = await mw.afterRead({ storeName, value: current });
+        current = await mw.afterRead({ storeName, value: current, key });
       }
     }
     return current;
