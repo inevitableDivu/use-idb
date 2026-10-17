@@ -3,6 +3,20 @@ import { useDatabase } from "./context";
 import { Engine } from "../core/engine";
 import type { IDBStatusSnapshot } from "../types/status";
 
+const SSR_STATUS_SNAPSHOT: IDBStatusSnapshot = Object.freeze({
+  connectionState: "SSR",
+  isFallbackMode: true,
+  isUpgradeBlocked: false,
+  requiresReloadForUpgrade: false,
+  quota: Object.freeze({
+    usageBytes: null,
+    quotaBytes: null,
+    percentUsed: null,
+    isPersisted: null,
+  }),
+  reconnect: async () => {},
+});
+
 /**
  * Hook exposing operational telemetry and connection lifecycle state for the IndexedDB engine.
  *
@@ -16,27 +30,6 @@ import type { IDBStatusSnapshot } from "../types/status";
  *
  * @param customEngine - Optional custom {@link Engine} instance. If omitted, consumes context engine.
  * @returns Synchronous referentially stable {@link IDBStatusSnapshot}.
- *
- * @example
- * ```tsx
- * import { useIDBStatus } from "use-idb";
- *
- * function StorageIndicator() {
- *   const { connectionState, quota, isUpgradeBlocked, reconnect } = useIDBStatus();
- *
- *   if (isUpgradeBlocked) {
- *     return <div className="alert">Database upgrade blocked by another tab. Please close other tabs.</div>;
- *   }
- *
- *   return (
- *     <div>
- *       <span>Status: {connectionState}</span>
- *       {quota.percentUsed !== null && <span>Used: {quota.percentUsed.toFixed(1)}%</span>}
- *       {connectionState === "CLOSED" && <button onClick={() => reconnect()}>Reconnect</button>}
- *     </div>
- *   );
- * }
- * ```
  */
 export function useIDBStatus(customEngine?: Engine): IDBStatusSnapshot {
   const defaultEngine = useDatabase();
@@ -54,19 +47,7 @@ export function useIDBStatus(customEngine?: Engine): IDBStatusSnapshot {
   }, [engine]);
 
   const getServerSnapshot = useCallback((): IDBStatusSnapshot => {
-    return {
-      connectionState: "SSR",
-      isFallbackMode: true,
-      isUpgradeBlocked: false,
-      requiresReloadForUpgrade: false,
-      quota: {
-        usageBytes: null,
-        quotaBytes: null,
-        percentUsed: null,
-        isPersisted: null,
-      },
-      reconnect: async () => {},
-    };
+    return SSR_STATUS_SNAPSHOT;
   }, []);
 
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);

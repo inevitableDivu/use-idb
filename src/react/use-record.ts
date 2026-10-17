@@ -2,6 +2,14 @@ import { useSyncExternalStore, useCallback, useMemo, useEffect } from "react";
 import { useDatabase } from "./context";
 import { toKeyString } from "../core/key-serializer";
 import type { QuerySnapshot } from "../core/l1-cache";
+import type { Engine } from "../core/engine";
+
+const STATIC_IDLE_SNAPSHOT: QuerySnapshot<any> = Object.freeze({
+  data: undefined,
+  isLoading: false,
+  isFetching: false,
+  error: null,
+});
 
 /**
  * Options for the {@link useRecord} hook.
@@ -58,58 +66,37 @@ export interface UseRecordResult<T> {
   /**
    * Performs a partial shallow patch of the record, merging fields into existing record.
    *
-   * @param partial - Partial object containing the fields to update.
+   * @param patch - Partial fields to update on the record.
    */
-  patch: (partial: Partial<T>) => Promise<void>;
+  patch: (patch: Partial<T>) => Promise<void>;
 
   /**
-   * Deletes the record from the object store.
+   * Removes the record from the object store.
    */
   remove: () => Promise<void>;
 }
 
 /**
- * Hook for watching and mutating a single record by primary key
- * with built-in optimistic updates and zero UI tearing.
+ * React hook for reading, writing, and optimistically subscribing to a single record
+ * by primary key in an IndexedDB object store.
  *
- * @template T - The entity record type.
- * @param storeName - Name of the target IndexedDB object store.
- * @param key - The primary key of the record. If `undefined`, queries are paused.
- * @param options - Optional fallback value and optimistic settings.
- * @returns Object with `data`, `isLoading`, `isFetching`, `error`, `set`, `patch`, and `remove`.
+ * Backed by synchronous L1 memory cache and `useSyncExternalStore` for React 19 Concurrent Mode safety.
  *
- * @example
- * ```tsx
- * import { useRecord } from "use-idb";
- *
- * interface UserProfile {
- *   id: string;
- *   name: string;
- *   email: string;
- * }
- *
- * function ProfileEditor({ userId }: { userId: string }) {
- *   const { data: user, patch, remove, isLoading } = useRecord<UserProfile>("users", userId);
- *
- *   if (isLoading) return <div>Loading user...</div>;
- *   if (!user) return <div>User not found</div>;
- *
- *   return (
- *     <div>
- *       <h1>{user.name}</h1>
- *       <button onClick={() => patch({ name: "Jane Doe" })}>Rename</button>
- *       <button onClick={() => remove()}>Delete Profile</button>
- *     </div>
- *   );
- * }
- * ```
+ * @template T - Entity record type.
+ * @param storeName - Target object store name.
+ * @param key - Record primary key (`string`, `number`, `Date`, etc.). If `undefined`, hook stays idle.
+ * @param options - Cache and fallback behavior options.
+ * @param customEngine - Optional engine instance override.
+ * @returns Synchronous {@link UseRecordResult} interface.
  */
 export function useRecord<T = unknown>(
   storeName: string,
   key: IDBValidKey | undefined,
   options?: UseRecordOptions<T>,
+  customEngine?: Engine,
 ): UseRecordResult<T> {
-  const engine = useDatabase();
+  const defaultEngine = useDatabase();
+  const engine = customEngine ?? defaultEngine;
   const optimistic = options?.optimistic ?? true;
   const isKeyDefined = key !== undefined;
   const keyStr = isKeyDefined ? toKeyString(key) : "__undefined__";
@@ -120,27 +107,41 @@ export function useRecord<T = unknown>(
     [engine, queryHash, storeName, key, isKeyDefined],
   );
 
-  const fetchRecord = useCallback(() => {
-    if (!entry || !isKeyDefined) return;
-    if (entry.status === "idle") {
-      engine.l1Cache.markPending(entry, [storeName]);
-      engine
-        .get<T>(storeName, key)
-        .then((val) => {
-          engine.l1Cache.resolve(entry, val);
-        })
-        .catch((err) => {
-          engine.l1Cache.reject(entry, err instanceof Error ? err : new Error(String(err)));
-        });
-    }
-  }, [engine, entry, storeName, key, isKeyDefined]);
+  const defaultValue = options?.defaultValue;
+  const defaultFallbackSnapshot = useMemo((): QuerySnapshot<T> => {
+    if (defaultValue === undefined) return STATIC_IDLE_SNAPSHOT;
+    return Object.freeze({
+      data: defaultValue,
+      isLoading: false,
+      isFetching: false,
+      error: null,
+    });
+  }, [defaultValue]);
+
+  const fetchRecord = useCallback(
+    (force = false) => {
+      if (!entry || !isKeyDefined) return;
+      if (force || entry.status === "idle") {
+        engine.l1Cache.markPending(entry, [storeName]);
+        engine
+          .get<T>(storeName, key)
+          .then((val) => {
+            engine.l1Cache.resolve(entry, val);
+          })
+          .catch((err) => {
+            engine.l1Cache.reject(entry, err instanceof Error ? err : new Error(String(err)));
+          });
+      }
+    },
+    [engine, entry, storeName, key, isKeyDefined],
+  );
 
   useEffect(() => {
     fetchRecord();
   }, [fetchRecord]);
 
   const fetcher = useCallback(async () => {
-    fetchRecord();
+    fetchRecord(true);
   }, [fetchRecord]);
 
   const subscribe = useCallback(
@@ -155,24 +156,14 @@ export function useRecord<T = unknown>(
 
   const getSnapshot = useCallback((): QuerySnapshot<T> => {
     if (!entry) {
-      return Object.freeze({
-        data: options?.defaultValue,
-        isLoading: false,
-        isFetching: false,
-        error: null,
-      });
+      return defaultFallbackSnapshot;
     }
     return entry.snapshot as QuerySnapshot<T>;
-  }, [entry, options?.defaultValue]);
+  }, [entry, defaultFallbackSnapshot]);
 
   const getServerSnapshot = useCallback((): QuerySnapshot<T> => {
-    return Object.freeze({
-      data: options?.defaultValue,
-      isLoading: false,
-      isFetching: false,
-      error: null,
-    });
-  }, [options?.defaultValue]);
+    return defaultFallbackSnapshot;
+  }, [defaultFallbackSnapshot]);
 
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
@@ -185,28 +176,26 @@ export function useRecord<T = unknown>(
   );
 
   const patch = useCallback(
-    async (partial: Partial<T>) => {
+    async (partialVal: Partial<T>) => {
       if (!isKeyDefined) throw new Error("Cannot patch record with undefined key");
-      const current = snapshot.data !== undefined ? snapshot.data : options?.defaultValue;
-      const merged =
-        typeof current === "object" && current !== null
-          ? { ...current, ...partial }
-          : (partial as unknown as T);
-      await engine.put(storeName, merged, key, { optimistic });
+      const current = snapshot.data ?? (await engine.get<T>(storeName, key));
+      const next = { ...current, ...partialVal } as T;
+      await engine.put(storeName, next, key, { optimistic });
     },
-    [engine, storeName, key, isKeyDefined, snapshot.data, options?.defaultValue, optimistic],
+    [engine, storeName, key, isKeyDefined, snapshot.data, optimistic],
   );
 
   const remove = useCallback(async () => {
-    if (!isKeyDefined) return;
+    if (!isKeyDefined) throw new Error("Cannot remove record with undefined key");
     await engine.delete(storeName, key, { optimistic });
   }, [engine, storeName, key, isKeyDefined, optimistic]);
 
-  const resolvedData = snapshot.data !== undefined ? snapshot.data : options?.defaultValue;
+  const resolvedData = snapshot.data !== undefined ? snapshot.data : defaultValue;
+  const isLoading = defaultValue !== undefined ? false : snapshot.isLoading;
 
   return {
     data: resolvedData,
-    isLoading: snapshot.isLoading,
+    isLoading,
     isFetching: snapshot.isFetching,
     error: snapshot.error,
     set,

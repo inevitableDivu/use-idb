@@ -1,4 +1,4 @@
-import { useSyncExternalStore, useCallback, useMemo, useEffect } from "react";
+import { useSyncExternalStore, useCallback, useMemo, useEffect, useRef } from "react";
 import { useDatabase } from "./context";
 import { Engine } from "../core/engine";
 import { QueryBuilder } from "../core/query-engine";
@@ -9,7 +9,7 @@ import type { QuerySnapshot } from "../core/l1-cache";
 /**
  * Result returned by the {@link useLiveQuery} hook.
  *
- * @template T - The query result type (array or single value).
+ * @template T - The query result type (array, single value, or count number).
  */
 export interface UseLiveQueryResult<T> {
   /**
@@ -40,39 +40,32 @@ export interface UseLiveQueryResult<T> {
 }
 
 /**
- * Subscribes to an IndexedDB query or multi-store read.
+ * Subscribes to an IndexedDB query, multi-store read, or live count query.
  *
  * Automatically re-renders with zero UI tearing via `useSyncExternalStore`
  * only when the tracked key range or store mutates.
  *
+ * Adheres to React 19 Concurrent Mode and synchronous Suspense contracts.
+ *
  * @template T - The resolved query return type.
  * @param queryFn - Function that returns a {@link QueryBuilder} or Promise of data.
  * @param deps - Dependency array. Changes to dependencies trigger a query re-execution.
- * @param options - Configuration options (`initialData`, `suspense`, `enabled`).
+ * @param options - Configuration options (`initialData`, `suspense`, `enabled`, `queryKey`).
+ * @param customEngine - Optional engine instance override.
  * @returns Object with `data`, `isLoading`, `isFetching`, `error`, and `refetch`.
- *
- * @example
- * ```tsx
- * import { useLiveQuery } from "use-idb";
- *
- * function CompletedTodos() {
- *   const { data: todos = [], isLoading } = useLiveQuery(
- *     (db) => db.query<Todo>("todos").where("completed").equals(1),
- *     [],
- *   );
- *
- *   if (isLoading) return <div>Loading...</div>;
- *   return <ul>{todos.map((t) => <li key={t.id}>{t.title}</li>)}</ul>;
- * }
- * ```
  */
 export function useLiveQuery<T>(
   queryFn: (db: Engine) => QueryBuilder<T> | Promise<T>,
   deps: unknown[] = [],
   options?: LiveQueryOptions<T>,
+  customEngine?: Engine,
 ): UseLiveQueryResult<T> {
-  const engine = useDatabase();
+  const defaultEngine = useDatabase();
+  const engine = customEngine ?? defaultEngine;
   const enabled = options?.enabled !== false;
+
+  const queryFnRef = useRef(queryFn);
+  queryFnRef.current = queryFn;
 
   const depsHash = useMemo(() => {
     try {
@@ -82,26 +75,27 @@ export function useLiveQuery<T>(
     }
   }, [deps]);
 
-  // Execute queryFn once to inspect if it returns a QueryBuilder with an AST
+  // Inspect QueryBuilder metadata once per dependency change
   const { queryAst, storeName } = useMemo(() => {
     try {
-      const result = queryFn(engine);
+      const result = queryFnRef.current(engine);
       if (result instanceof QueryBuilder) {
         const ast = result.getAST();
         return { queryAst: ast, storeName: ast.storeName };
       }
     } catch {
-      // Ignore
+      // Handled during fetch execution
     }
     return { queryAst: undefined, storeName: "default" };
-  }, [engine, queryFn]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, depsHash]);
 
   const queryHash = useMemo(() => {
     if (queryAst) {
-      return `query:${hashQuery(queryAst)}:${depsHash}`;
+      return `query:${hashQuery(queryAst, options?.queryKey)}:${depsHash}`;
     }
-    return `custom-query:${depsHash}`;
-  }, [queryAst, depsHash]);
+    return `custom-query:${options?.queryKey ?? ""}:${depsHash}`;
+  }, [queryAst, options?.queryKey, depsHash]);
 
   const entry = useMemo(
     () =>
@@ -114,17 +108,25 @@ export function useLiveQuery<T>(
     [engine, queryHash, storeName, queryAst],
   );
 
-  const executeFetch = useCallback(async () => {
-    if (!enabled) return;
+  const executeFetch = useCallback((): Promise<T> => {
+    if (!enabled) return Promise.resolve(undefined as unknown as T);
     engine.l1Cache.markPending(entry, [storeName]);
 
     const promise = (async () => {
       try {
-        const result = queryFn(engine);
-        const data =
-          result instanceof QueryBuilder
-            ? ((await result.toArray()) as unknown as T)
-            : await result;
+        const result = queryFnRef.current(engine);
+        let data: T;
+        if (result instanceof QueryBuilder) {
+          const ast = result.getAST();
+          if (ast.isCount) {
+            data = (await result.count()) as unknown as T;
+          } else {
+            data = (await result.toArray()) as unknown as T;
+          }
+        } else {
+          data = await result;
+        }
+
         engine.l1Cache.resolve(entry, data);
         return data;
       } catch (err) {
@@ -135,12 +137,8 @@ export function useLiveQuery<T>(
     })();
 
     engine.l1Cache.setPromise(queryHash, promise);
-    try {
-      await promise;
-    } catch {
-      // Handled in promise
-    }
-  }, [engine, entry, queryFn, storeName, enabled, queryHash]);
+    return promise;
+  }, [engine, entry, storeName, enabled, queryHash]);
 
   useEffect(() => {
     if (entry.status === "idle" && enabled) {
@@ -159,34 +157,45 @@ export function useLiveQuery<T>(
     [engine, queryHash, entry.status, enabled, executeFetch],
   );
 
-  const getSnapshot = useCallback(() => {
+  const getSnapshot = useCallback((): QuerySnapshot<T> => {
     return entry.snapshot as QuerySnapshot<T>;
   }, [entry]);
 
-  const getServerSnapshot = useCallback((): QuerySnapshot<T> => {
+  const fallbackServerSnapshot = useMemo((): QuerySnapshot<T> => {
     return Object.freeze({
       data: options?.initialData,
-      isLoading: !options?.initialData,
+      isLoading: options?.initialData === undefined,
       isFetching: false,
       error: null,
     });
   }, [options?.initialData]);
 
+  const getServerSnapshot = useCallback((): QuerySnapshot<T> => {
+    return fallbackServerSnapshot;
+  }, [fallbackServerSnapshot]);
+
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  // React Suspense support
-  const suspensePromise = options?.suspense ? engine.l1Cache.getPromise(queryHash) : undefined;
-  if (options?.suspense && snapshot.isLoading && suspensePromise) {
-    throw suspensePromise;
+  // REA-02: Synchronous React Suspense Contract
+  if (options?.suspense && snapshot.isLoading) {
+    let promise = engine.l1Cache.getPromise(queryHash) as Promise<T> | undefined;
+    if (!promise) {
+      promise = executeFetch();
+    }
+    throw promise;
   }
 
   const resolvedData = snapshot.data !== undefined ? snapshot.data : options?.initialData;
+
+  const refetch = useCallback(async () => {
+    await executeFetch();
+  }, [executeFetch]);
 
   return {
     data: resolvedData,
     isLoading: snapshot.isLoading,
     isFetching: snapshot.isFetching,
     error: snapshot.error,
-    refetch: executeFetch,
+    refetch,
   };
 }

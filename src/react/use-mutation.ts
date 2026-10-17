@@ -1,121 +1,101 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useDatabase } from "./context";
 import type { IStorageTransaction, StorageBatchOp } from "../ports/storage.port";
+import type { Engine } from "../core/engine";
 
 /**
- * Write primitives and state returned by the {@link useMutation} hook.
+ * Result returned by the {@link useMutation} hook.
  */
 export interface UseMutationResult {
   /**
-   * Writes a record into an object store via the microtask {@link WriteCoalescer}.
-   * Concurrent calls in the same microtask are bundled into a single atomic transaction.
+   * Puts a record into an object store.
    *
-   * @template T - The stored record type.
    * @param storeName - Target object store name.
    * @param value - Record value to store.
-   * @param key - Explicit primary key (required if out-of-line keys or keyval store).
-   * @param options - Optional configuration (e.g. `optimistic: boolean`).
-   * @returns The generated or provided primary key.
+   * @param key - Out-of-line primary key (optional if store uses inline keyPath).
+   * @param options - Cache and optimistic options.
+   * @returns Promise resolving to the primary key.
    */
-  put: <T>(
+  put<T>(
     storeName: string,
     value: T,
     key?: IDBValidKey,
     options?: { optimistic?: boolean },
-  ) => Promise<IDBValidKey>;
+  ): Promise<IDBValidKey>;
 
   /**
-   * High-throughput chunked bulk insert/upsert across an object store.
+   * Writes an array of records in batched chunks.
    *
-   * @template T - The stored record type.
    * @param storeName - Target object store name.
-   * @param items - Array of `{ key, value }` objects to insert.
-   * @param options - Chunking options (`chunkSize`, defaults to 500).
+   * @param items - Records to insert or update.
+   * @param options - Chunk size options.
    * @returns Array of resulting primary keys.
    */
-  bulkPut: <T>(
+  bulkPut<T>(
     storeName: string,
     items: Array<{ key?: IDBValidKey; value: T }>,
     options?: { chunkSize?: number },
-  ) => Promise<(IDBValidKey | undefined)[]>;
+  ): Promise<(IDBValidKey | undefined)[]>;
 
   /**
-   * Deletes a record by key via the write coalescer with optimistic overlay removal.
+   * Removes a record from an object store by primary key.
    *
    * @param storeName - Target object store name.
    * @param key - Primary key of record to delete.
-   * @param options - Optional configuration (e.g. `optimistic: boolean`).
+   * @param options - Optimistic options.
    */
-  deleteRecord: (
+  deleteRecord(
     storeName: string,
     key: IDBValidKey,
     options?: { optimistic?: boolean },
-  ) => Promise<void>;
+  ): Promise<void>;
 
   /**
-   * Truncates and deletes all records in the specified object store.
+   * Deletes all records in an object store.
    *
-   * @param storeName - Target object store name to clear.
+   * @param storeName - Target object store name.
    */
-  clearStore: (storeName: string) => Promise<void>;
+  clearStore(storeName: string): Promise<void>;
 
   /**
-   * Executes an explicit atomic multi-store IndexedDB transaction.
+   * Executes an explicit atomic transaction across multiple stores.
    *
-   * @template T - Return type of transaction callback.
-   * @param storeNames - Array of stores accessed inside the transaction.
+   * @param storeNames - Array of store names involved in the transaction.
    * @param mode - `"readonly"` or `"readwrite"`.
-   * @param fn - Asynchronous transaction execution block receiving a transaction proxy.
-   * @returns Value returned from `fn`.
+   * @param fn - Asynchronous transaction work.
    */
-  transaction: <T>(
+  transaction<T>(
     storeNames: string[],
     mode: "readonly" | "readwrite",
     fn: (tx: IStorageTransaction) => Promise<T>,
-  ) => Promise<T>;
+  ): Promise<T>;
 
   /**
-   * `true` whenever any mutation initiated by this hook instance is currently processing.
+   * `true` whenever one or more mutations are actively executing in flight.
    */
   isPending: boolean;
 
   /**
-   * Error caught during the most recent mutation execution, or `null` if none.
+   * Most recent mutation error, or `null` if healthy.
    */
   error: Error | null;
 }
 
 /**
- * Mutation hook exposing write primitives backed by the microtask `WriteCoalescer`
- * and explicit multi-store atomic transactions.
+ * React hook providing imperative mutation primitives for writing, deleting,
+ * and bulk importing records into IndexedDB.
  *
- * @returns Object containing `put`, `bulkPut`, `deleteRecord`, `clearStore`, `transaction`, `isPending`, and `error`.
+ * Implements concurrency-safe `isPending` state via an active mutation counter ref,
+ * preventing premature pending resets during overlapping concurrent writes.
  *
- * @example
- * ```tsx
- * import { useMutation } from "use-idb";
- *
- * function AddUserForm() {
- *   const { put, isPending, error } = useMutation();
- *
- *   const handleSubmit = async (e: React.FormEvent) => {
- *     e.preventDefault();
- *     await put("users", { id: "u_1", name: "Alice" }, "u_1");
- *   };
- *
- *   return (
- *     <form onSubmit={handleSubmit}>
- *       <button type="submit" disabled={isPending}>
- *         {isPending ? "Saving..." : "Add User"}
- *       </button>
- *       {error && <p style={{ color: "red" }}>{error.message}</p>}
- *     </form>
- *   );
- * }
- * ```
+ * @param customEngine - Optional engine instance override.
+ * @returns Interface containing mutation methods and pending/error states.
  */
-export function useMutation(): UseMutationResult {
-  const engine = useDatabase();
+export function useMutation(customEngine?: Engine): UseMutationResult {
+  const defaultEngine = useDatabase();
+  const engine = customEngine ?? defaultEngine;
+
+  const activeMutationsRef = useRef(0);
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -126,6 +106,7 @@ export function useMutation(): UseMutationResult {
       key?: IDBValidKey,
       options?: { optimistic?: boolean },
     ): Promise<IDBValidKey> => {
+      activeMutationsRef.current++;
       setIsPending(true);
       setError(null);
       try {
@@ -135,7 +116,8 @@ export function useMutation(): UseMutationResult {
         setError(e);
         throw e;
       } finally {
-        setIsPending(false);
+        activeMutationsRef.current = Math.max(0, activeMutationsRef.current - 1);
+        setIsPending(activeMutationsRef.current > 0);
       }
     },
     [engine],
@@ -147,6 +129,7 @@ export function useMutation(): UseMutationResult {
       items: Array<{ key?: IDBValidKey; value: T }>,
       options?: { chunkSize?: number },
     ): Promise<(IDBValidKey | undefined)[]> => {
+      activeMutationsRef.current++;
       setIsPending(true);
       setError(null);
       const chunkSize = options?.chunkSize ?? 500;
@@ -169,7 +152,8 @@ export function useMutation(): UseMutationResult {
         setError(e);
         throw e;
       } finally {
-        setIsPending(false);
+        activeMutationsRef.current = Math.max(0, activeMutationsRef.current - 1);
+        setIsPending(activeMutationsRef.current > 0);
       }
     },
     [engine],
@@ -181,6 +165,7 @@ export function useMutation(): UseMutationResult {
       key: IDBValidKey,
       options?: { optimistic?: boolean },
     ): Promise<void> => {
+      activeMutationsRef.current++;
       setIsPending(true);
       setError(null);
       try {
@@ -190,7 +175,8 @@ export function useMutation(): UseMutationResult {
         setError(e);
         throw e;
       } finally {
-        setIsPending(false);
+        activeMutationsRef.current = Math.max(0, activeMutationsRef.current - 1);
+        setIsPending(activeMutationsRef.current > 0);
       }
     },
     [engine],
@@ -198,6 +184,7 @@ export function useMutation(): UseMutationResult {
 
   const clearStore = useCallback(
     async (storeName: string): Promise<void> => {
+      activeMutationsRef.current++;
       setIsPending(true);
       setError(null);
       try {
@@ -207,7 +194,8 @@ export function useMutation(): UseMutationResult {
         setError(e);
         throw e;
       } finally {
-        setIsPending(false);
+        activeMutationsRef.current = Math.max(0, activeMutationsRef.current - 1);
+        setIsPending(activeMutationsRef.current > 0);
       }
     },
     [engine],
@@ -219,6 +207,7 @@ export function useMutation(): UseMutationResult {
       mode: "readonly" | "readwrite",
       fn: (tx: IStorageTransaction) => Promise<T>,
     ): Promise<T> => {
+      activeMutationsRef.current++;
       setIsPending(true);
       setError(null);
       try {
@@ -228,7 +217,8 @@ export function useMutation(): UseMutationResult {
         setError(e);
         throw e;
       } finally {
-        setIsPending(false);
+        activeMutationsRef.current = Math.max(0, activeMutationsRef.current - 1);
+        setIsPending(activeMutationsRef.current > 0);
       }
     },
     [engine],

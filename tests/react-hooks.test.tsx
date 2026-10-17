@@ -1,6 +1,6 @@
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act, waitFor, render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
-import React from "react";
+import React, { Suspense } from "react";
 import {
   useIdb,
   useRecord,
@@ -95,6 +95,33 @@ describe("React Hooks", () => {
         expect(result.current.data?.score).toBe(250);
       });
     });
+
+    it("maintains referentially identical snapshot across re-renders when key is undefined", () => {
+      const db = createDatabase({
+        name: "test-snapshot-stability-db",
+        version: 1,
+        stores: { notes: { keyPath: "id" } },
+      });
+
+      const { result, rerender } = renderHook(
+        ({ recordKey }: { recordKey?: string }) => useRecord("notes", recordKey, undefined, db),
+        { initialProps: { recordKey: undefined } },
+      );
+
+      const firstData = result.current.data;
+      const firstLoading = result.current.isLoading;
+      const firstFetching = result.current.isFetching;
+
+      // Force multiple component re-renders while key remains undefined
+      rerender({ recordKey: undefined });
+      rerender({ recordKey: undefined });
+
+      expect(result.current.data).toBe(firstData);
+      expect(result.current.isLoading).toBe(firstLoading);
+      expect(result.current.isFetching).toBe(firstFetching);
+      expect(result.current.data).toBeUndefined();
+      expect(result.current.isLoading).toBe(false);
+    });
   });
 
   describe("useMutation", () => {
@@ -154,6 +181,94 @@ describe("React Hooks", () => {
       await waitFor(() => {
         expect(result.current.data).toHaveLength(1);
         expect(result.current.data?.[0]?.text).toBe("Buy groceries");
+      });
+    });
+
+    it("suspends on initial query read and resolves with live query data", async () => {
+      const db = createDatabase({
+        name: "test-suspense-db",
+        version: 1,
+        stores: { items: { keyPath: "id" } },
+      });
+
+      await db.put("items", { id: "i1", title: "Suspense Item" });
+
+      function SuspenseComponent() {
+        const { data } = useLiveQuery(
+          (engine) => engine.query<{ id: string; title: string }>("items").toArray(),
+          [],
+          { suspense: true },
+          db,
+        );
+
+        return (
+          <div>
+            <h1>Items</h1>
+            <ul>
+              {data?.map((item) => (
+                <li key={item.id}>{item.title}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      }
+
+      render(
+        <Suspense fallback={<div data-testid="suspense-fallback">Loading...</div>}>
+          <SuspenseComponent />
+        </Suspense>,
+      );
+
+      // Initially fallback should be visible
+      expect(screen.queryByTestId("suspense-fallback")).not.toBeNull();
+
+      // After async query resolves, items are displayed
+      await waitFor(() => {
+        expect(screen.getByText("Suspense Item")).not.toBeNull();
+      });
+      expect(screen.queryByTestId("suspense-fallback")).toBeNull();
+    });
+
+    it("reactively updates count when records are inserted and deleted", async () => {
+      const db = createDatabase({
+        name: "test-count-db",
+        version: 1,
+        stores: { tasks: { keyPath: "id" } },
+      });
+
+      const { result } = renderHook(() =>
+        useLiveQuery((engine) => engine.query("tasks").asCount(), [], undefined, db),
+      );
+
+      await waitFor(() => {
+        expect(result.current.data).toBe(0);
+      });
+
+      // Insert record 1
+      await act(async () => {
+        await db.put("tasks", { id: "t1", title: "Task 1" });
+      });
+
+      await waitFor(() => {
+        expect(result.current.data).toBe(1);
+      });
+
+      // Insert record 2
+      await act(async () => {
+        await db.put("tasks", { id: "t2", title: "Task 2" });
+      });
+
+      await waitFor(() => {
+        expect(result.current.data).toBe(2);
+      });
+
+      // Delete record 1
+      await act(async () => {
+        await db.delete("tasks", "t1");
+      });
+
+      await waitFor(() => {
+        expect(result.current.data).toBe(1);
       });
     });
   });
