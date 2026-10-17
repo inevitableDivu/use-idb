@@ -87,9 +87,12 @@ export class MemoryStorageAdapter implements IStoragePort {
     return true;
   }
 
-  private extractIndexValue(record: unknown, indexName?: string): unknown {
-    if (!indexName || record === null || typeof record !== "object") return undefined;
-    const parts = indexName.split(".");
+  private extractIndexValue(record: unknown, indexPath?: string | readonly string[]): unknown {
+    if (!indexPath || record === null || typeof record !== "object") return undefined;
+    if (typeof indexPath !== "string") {
+      return [...indexPath].map((path) => this.extractIndexValue(record, path));
+    }
+    const parts = indexPath.split(".");
     let current: unknown = record;
     for (const part of parts) {
       if (current === null || typeof current !== "object") return undefined;
@@ -153,13 +156,26 @@ export class MemoryStorageAdapter implements IStoragePort {
     store.clear();
   }
 
-  async count(storeName: string, range?: IDBKeyRange | IDBValidKey): Promise<number> {
+  async count(
+    storeName: string,
+    range?: IDBKeyRange | IDBValidKey,
+    indexName?: string,
+    keyPath?: string | readonly string[],
+    multiEntry = false,
+  ): Promise<number> {
     const store = this.ensureStore(storeName);
-    if (range === undefined) return store.size;
+    if (range === undefined && !indexName) return store.size;
 
     let total = 0;
     for (const rec of store.values()) {
-      if (this.matchesRange(rec.key, range)) {
+      const target = indexName
+        ? this.extractIndexValue(rec.value, keyPath ?? indexName)
+        : rec.key;
+      if (multiEntry && Array.isArray(target)) {
+        for (const entry of target) {
+          if (this.matchesRange(entry, range)) total++;
+        }
+      } else if (target !== undefined && this.matchesRange(target, range)) {
         total++;
       }
     }
@@ -204,10 +220,19 @@ export class MemoryStorageAdapter implements IStoragePort {
 
     for (const rec of store.values()) {
       const compareTarget = ast.indexName
-        ? this.extractIndexValue(rec.value, ast.indexName)
+        ? this.extractIndexValue(
+            rec.value,
+            ast.fieldPath ?? ast.indexName,
+          )
         : rec.key;
 
-      if (this.matchesRange(compareTarget, ast.range)) {
+      if (ast.indexMultiEntry && Array.isArray(compareTarget)) {
+        for (const entry of compareTarget) {
+          if (this.matchesRange(entry, ast.range)) {
+            matched.push({ key: rec.key, value: rec.value as T });
+          }
+        }
+      } else if (this.matchesRange(compareTarget, ast.range)) {
         matched.push({ key: rec.key, value: rec.value as T });
       }
     }

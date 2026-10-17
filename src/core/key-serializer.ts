@@ -75,11 +75,16 @@ export function hashQuery<T>(ast: QueryAST<T>, queryKey?: string): string {
   const parts = [
     ast.storeName,
     ast.indexName ?? "",
+    ast.fieldName ?? "",
     stringifyRange(ast.range),
     ast.direction,
     String(ast.offsetCount),
     ast.limitCount !== undefined ? String(ast.limitCount) : "*",
     ast.isCount ? "count" : "data",
+    ast.orderField ?? "",
+    ast.orderDirection ?? "",
+    ast.selectedFields?.join(",") ?? "",
+    ast.filterKey ?? "",
     queryKey ?? ast.queryKey ?? (ast.filterPredicate ? ast.filterPredicate.toString() : ""),
   ];
   return parts.join("|");

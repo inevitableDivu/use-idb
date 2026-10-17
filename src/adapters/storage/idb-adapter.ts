@@ -332,13 +332,20 @@ export class IndexedDBStorageAdapter implements IStoragePort {
     );
   }
 
-  async count(storeName: string, range?: IDBKeyRange | IDBValidKey): Promise<number> {
+  async count(
+    storeName: string,
+    range?: IDBKeyRange | IDBValidKey,
+    indexName?: string,
+  ): Promise<number> {
     return this.executeWithRetry(
       (db) =>
         new Promise<number>((resolve, reject) => {
           const tx = db.transaction(storeName, "readonly");
           const keyRange = range instanceof IDBKeyRange ? range : range;
-          const req = tx.objectStore(storeName).count(keyRange);
+          const source = indexName
+            ? tx.objectStore(storeName).index(indexName)
+            : tx.objectStore(storeName);
+          const req = source.count(keyRange);
           req.onsuccess = () => resolve(req.result);
           req.onerror = () => reject(req.error);
         }),

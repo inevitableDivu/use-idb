@@ -31,7 +31,7 @@ export function runMigrations(
 
     if (!existingStores.has(name)) {
       store = db.createObjectStore(name, {
-        keyPath: config.keyPath,
+        keyPath: config.keyPath as string | string[] | null | undefined,
         autoIncrement: config.autoIncrement,
       });
     } else {

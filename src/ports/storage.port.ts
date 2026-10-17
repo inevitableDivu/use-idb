@@ -104,7 +104,13 @@ export interface IStoragePort {
   /**
    * Returns the count of records matching an optional key range.
    */
-  count(storeName: string, range?: IDBKeyRange | IDBValidKey): Promise<number>;
+  count(
+    storeName: string,
+    range?: IDBKeyRange | IDBValidKey,
+    indexName?: string,
+    keyPath?: string | readonly string[],
+    multiEntry?: boolean,
+  ): Promise<number>;
 
   /**
    * Executes a synchronous batch of put/delete operations inside a single atomic transaction.

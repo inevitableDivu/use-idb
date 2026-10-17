@@ -1,4 +1,4 @@
-import type { DatabaseSchema } from "../types/schema";
+import type { DatabaseSchema, StoreKey, StoreNames, StoreValue } from "../types/schema";
 import type { IDBStatusSnapshot, StorageQuota } from "../types/status";
 import type { IStoragePort, IStorageTransaction, StorageBatchOp } from "../ports/storage.port";
 import type { ISyncPort } from "../ports/sync.port";
@@ -15,6 +15,7 @@ import { L1Cache } from "./l1-cache";
 import { DependencyTracker } from "./dependency-tracker";
 import { WriteCoalescer } from "./write-coalescer";
 import { QueryBuilder } from "./query-engine";
+import { isValidKey } from "./key-serializer";
 
 /**
  * Advanced configuration options for instantiating an {@link Engine}.
@@ -205,34 +206,107 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
 
   // ── Core CRUD Delegations ──
 
-  async get<T>(storeName: string, key: IDBValidKey): Promise<T | undefined> {
+  async get<K extends StoreNames<TSchema>>(
+    storeName: K,
+    key: StoreKey<TSchema, K>,
+  ): Promise<StoreValue<TSchema, K> | undefined> {
     const raw = await this.storage.get(storeName, key);
     if (raw === undefined) return undefined;
-    return (await this.middlewarePipeline.runAfterRead(storeName, raw, key)) as T;
+    return (await this.middlewarePipeline.runAfterRead(storeName, raw, key)) as StoreValue<TSchema, K>;
   }
 
-  query<T>(storeName: string): QueryBuilder<T> {
-    return new QueryBuilder<T>(this.storage, storeName, this.middlewarePipeline);
+  query<K extends StoreNames<TSchema>>(
+    storeName: K,
+  ): QueryBuilder<
+    StoreValue<TSchema, K> extends object ? StoreValue<TSchema, K> : Record<string, unknown>,
+    TSchema["stores"][K]
+  > {
+    type Item = StoreValue<TSchema, K> extends object
+      ? StoreValue<TSchema, K>
+      : Record<string, unknown>;
+    return new QueryBuilder(
+      this.storage,
+      storeName,
+      this.middlewarePipeline,
+      this.schema.stores[storeName] as TSchema["stores"][K],
+    ) as unknown as QueryBuilder<Item, TSchema["stores"][K]>;
   }
 
-  async put<T = unknown>(
-    storeName: string,
-    value: T,
-    key?: IDBValidKey,
+  async put<K extends StoreNames<TSchema>>(
+    storeName: K,
+    value: StoreValue<TSchema, K>,
+    key?: StoreKey<TSchema, K>,
     options?: { optimistic?: boolean },
-  ): Promise<IDBValidKey> {
-    return this.writeCoalescer.put(storeName, value, key, options);
+  ): Promise<StoreKey<TSchema, K>> {
+    const resolvedKey = this.resolveWriteKey(storeName, value, key as IDBValidKey | undefined);
+    return this.writeCoalescer.put(
+      storeName,
+      value,
+      resolvedKey,
+      options,
+    ) as Promise<StoreKey<TSchema, K>>;
   }
 
-  async delete(
-    storeName: string,
-    key: IDBValidKey,
+  async putMany<K extends StoreNames<TSchema>>(
+    storeName: K,
+    values: readonly StoreValue<TSchema, K>[],
+  ): Promise<StoreKey<TSchema, K>[]> {
+    if (values.length === 0) return [];
+    const results = await this.writeCoalescer.batch(
+      storeName,
+      values.map((value) => ({
+        type: "put" as const,
+        value,
+        key: this.resolveWriteKey(storeName, value, undefined),
+      })),
+    );
+    return results as StoreKey<TSchema, K>[];
+  }
+
+  private resolveWriteKey(storeName: string, value: unknown, key?: IDBValidKey): IDBValidKey | undefined {
+    if (key !== undefined) return key;
+    const keyPath = this.schema.stores[storeName]?.keyPath;
+    if (keyPath === undefined || value === null || typeof value !== "object") return undefined;
+    const paths: readonly string[] =
+      typeof keyPath === "string" ? [keyPath] : (keyPath as readonly string[]);
+    const keyParts: unknown[] = [];
+    for (const path of paths) {
+      let current: unknown = value;
+      for (const part of path.split(".")) {
+        if (current === null || typeof current !== "object") {
+          current = undefined;
+          break;
+        }
+        current = (current as Record<string, unknown>)[part];
+      }
+      keyParts.push(current);
+    }
+    const candidate = Array.isArray(keyPath) ? keyParts : keyParts[0];
+    return isValidKey(candidate) ? candidate : undefined;
+  }
+
+  async getAll<K extends StoreNames<TSchema>>(
+    storeName: K,
+  ): Promise<StoreValue<TSchema, K>[]> {
+    const results = await this.storage.getAll<StoreValue<TSchema, K>>(storeName);
+    const transformed: StoreValue<TSchema, K>[] = [];
+    for (const value of results) {
+      transformed.push(
+        (await this.middlewarePipeline.runAfterRead(storeName, value)) as StoreValue<TSchema, K>,
+      );
+    }
+    return transformed;
+  }
+
+  async delete<K extends StoreNames<TSchema>>(
+    storeName: K,
+    key: StoreKey<TSchema, K>,
     options?: { optimistic?: boolean },
   ): Promise<void> {
-    return this.writeCoalescer.delete(storeName, key, options);
+    return this.writeCoalescer.delete(storeName, key as IDBValidKey, options);
   }
 
-  async clear(storeName: string): Promise<void> {
+  async clear<K extends StoreNames<TSchema>>(storeName: K): Promise<void> {
     return this.writeCoalescer.clear(storeName);
   }
 
@@ -294,6 +368,9 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
     }
   }
 }
+
+export type DatabaseInstance<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> =
+  Engine<TSchema>;
 
 /**
  * Creates and configures an {@link Engine} instance bound to the provided database schema.

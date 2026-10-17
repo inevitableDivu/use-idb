@@ -8,6 +8,7 @@ import {
   useMutation,
   useIDBStatus,
   createDatabase,
+  store,
   IndexedDBProvider,
 } from "../src";
 
@@ -57,7 +58,7 @@ describe("React Hooks", () => {
         name: "test-hooks-db",
         version: 1,
         stores: {
-          profiles: { keyPath: "id" },
+          profiles: store<{ id: string; name: string; score: number }>()({ keyPath: "id" }),
         },
       });
 
@@ -130,7 +131,7 @@ describe("React Hooks", () => {
         name: "test-mutation-db",
         version: 1,
         stores: {
-          items: { keyPath: "id" },
+          items: store<{ id: string; label: string }>()({ keyPath: "id" }),
         },
       });
 
@@ -144,7 +145,7 @@ describe("React Hooks", () => {
         await result.current.put("items", { id: "m1", label: "Mutated Item" });
       });
 
-      const item = await db.get<{ id: string; label: string }>("items", "m1");
+      const item = await db.get("items", "m1");
       expect(item?.label).toBe("Mutated Item");
     });
   });
@@ -155,7 +156,7 @@ describe("React Hooks", () => {
         name: "test-livequery-db",
         version: 1,
         stores: {
-          todos: { keyPath: "id" },
+          todos: store<{ id: string; text: string }>()({ keyPath: "id" }),
         },
       });
 
@@ -165,9 +166,14 @@ describe("React Hooks", () => {
 
       const { result } = renderHook(
         () =>
-          useLiveQuery<{ id: string; text: string }[]>((client) => client.query("todos"), [], {
+          useLiveQuery<{ id: string; text: string }[]>(
+            (client) =>
+              client.query("todos").toArray() as Promise<{ id: string; text: string }[]>,
+            [],
+            {
             initialData: [],
-          }),
+            },
+          ),
         { wrapper },
       );
 
@@ -188,14 +194,17 @@ describe("React Hooks", () => {
       const db = createDatabase({
         name: "test-suspense-db",
         version: 1,
-        stores: { items: { keyPath: "id" } },
+        stores: {
+          items: store<{ id: string; title: string }>()({ keyPath: "id" }),
+        },
       });
 
       await db.put("items", { id: "i1", title: "Suspense Item" });
 
       function SuspenseComponent() {
-        const { data } = useLiveQuery(
-          (engine) => engine.query<{ id: string; title: string }>("items").toArray(),
+        const { data } = useLiveQuery<{ id: string; title: string }[]>(
+          (engine) =>
+            engine.query("items").toArray() as Promise<{ id: string; title: string }[]>,
           [],
           { suspense: true },
           db,
@@ -233,11 +242,11 @@ describe("React Hooks", () => {
       const db = createDatabase({
         name: "test-count-db",
         version: 1,
-        stores: { tasks: { keyPath: "id" } },
+        stores: { tasks: store<{ id: string; title: string }>()({ keyPath: "id" }) },
       });
 
       const { result } = renderHook(() =>
-        useLiveQuery((engine) => engine.query("tasks").asCount(), [], undefined, db),
+        useLiveQuery<number>((engine) => engine.query("tasks").asCount(), [], undefined, db),
       );
 
       await waitFor(() => {
