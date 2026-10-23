@@ -4,6 +4,8 @@ import { toKeyString } from "../core/key-serializer";
 import type { QuerySnapshot } from "../core/l1-cache";
 import type { Engine } from "../core/engine";
 
+const patchQueues = new WeakMap<Engine, Map<string, Promise<unknown>>>();
+
 const STATIC_IDLE_SNAPSHOT: QuerySnapshot<any> = Object.freeze({
   data: undefined,
   isLoading: false,
@@ -122,14 +124,18 @@ export function useRecord<T extends object = Record<string, unknown>>(
     (force = false) => {
       if (!entry || !isKeyDefined) return;
       if (force || entry.status === "idle") {
-        engine.l1Cache.markPending(entry, [storeName]);
+        const requestId = engine.l1Cache.markPending(entry, [storeName]);
         engine
           .get(storeName, key)
           .then((val) => {
-            engine.l1Cache.resolve(entry, val as T | undefined);
+            engine.l1Cache.resolve(entry, val as T | undefined, requestId);
           })
           .catch((err) => {
-            engine.l1Cache.reject(entry, err instanceof Error ? err : new Error(String(err)));
+            engine.l1Cache.reject(
+              entry,
+              err instanceof Error ? err : new Error(String(err)),
+              requestId,
+            );
           });
       }
     },
@@ -178,11 +184,29 @@ export function useRecord<T extends object = Record<string, unknown>>(
   const patch = useCallback(
     async (partialVal: Partial<T>) => {
       if (!isKeyDefined) throw new Error("Cannot patch record with undefined key");
-      const current = snapshot.data ?? ((await engine.get(storeName, key)) as T | undefined);
-      const next = { ...current, ...partialVal } as T;
-      await engine.put(storeName, next, key, { optimistic });
+      // Serialize patches for this engine/store/key so concurrent shallow merges do not
+      // overwrite fields from one another. Read persisted state inside the queue, not a
+      // potentially stale render snapshot.
+      const queueKey = `${storeName}:${toKeyString(key)}`;
+      let queues = patchQueues.get(engine);
+      if (!queues) {
+        queues = new Map();
+        patchQueues.set(engine, queues);
+      }
+      const previous = queues.get(queueKey) ?? Promise.resolve();
+      const operation = previous.catch(() => {}).then(async () => {
+        const current = (await engine.get(storeName, key)) as T | undefined;
+        const next = { ...(current ?? {}), ...partialVal } as T;
+        await engine.put(storeName, next, key, { optimistic });
+      });
+      queues.set(queueKey, operation);
+      try {
+        await operation;
+      } finally {
+        if (queues.get(queueKey) === operation) queues.delete(queueKey);
+      }
     },
-    [engine, storeName, key, isKeyDefined, snapshot.data, optimistic],
+    [engine, storeName, key, isKeyDefined, optimistic],
   );
 
   const remove = useCallback(async () => {
