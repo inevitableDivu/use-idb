@@ -71,7 +71,10 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
         name: `encrypted-read-regression-${Date.now()}-${Math.random()}`,
         version: 1,
         stores: {
-          records: store<SecretRecord>()({ keyPath: "id" }),
+          records: store<SecretRecord>()({
+            keyPath: "id",
+            indexes: { by_label: { keyPath: "label" } },
+          }),
           external: {},
         },
       },
@@ -96,6 +99,9 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
       await expect(db.get("records", original.id)).resolves.toEqual(original);
       await expect(db.getAll("records")).resolves.toEqual([original]);
       await expect(db.query("records").toArray()).resolves.toEqual([original]);
+      await expect(
+        db.query("records").where("label").equals("visible metadata").toArray(),
+      ).resolves.toEqual([original]);
 
       // Out-of-line stores must retain the actual storage key for middleware AAD too.
       const externalOriginal = { secret: "external private value", label: "metadata" };
