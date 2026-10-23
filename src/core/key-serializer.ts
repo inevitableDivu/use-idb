@@ -99,5 +99,5 @@ export function hashQuery<T>(ast: QueryAST<T>, queryKey?: string): string {
     ast.filterKey ?? "",
     queryKey ?? ast.queryKey ?? (ast.filterPredicate ? ast.filterPredicate.toString() : ""),
   ];
-  return parts.join("|");
+  return JSON.stringify(parts);
 }
