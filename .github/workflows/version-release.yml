@@ -60,7 +60,7 @@ jobs:
       - name: Open or update version bump PR
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
-          token: ${{ github.token }}
+          token: ${{ secrets.RELEASE_PAT || github.token }}
           base: main
           branch: automation/release-version
           delete-branch: true
