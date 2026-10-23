@@ -112,6 +112,24 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
     }
   });
 
+  it("records wildcard AAD scope when a primary key is unavailable", async () => {
+    const key = await generateAesKey();
+    const middleware = createEncryptionMiddleware(key, ["secret"]);
+    const encrypted = (await middleware.beforeWrite?.({
+      storeName: "records",
+      operation: "put",
+      value: { secret: "generated-key-value" },
+    })) as { secret: { keyBound?: boolean } };
+
+    expect(encrypted.secret.keyBound).toBe(false);
+    const decrypted = (await middleware.afterRead?.({
+      storeName: "records",
+      key: 42,
+      value: encrypted,
+    })) as { secret: string };
+    expect(decrypted.secret).toBe("generated-key-value");
+  });
+
   it("rejects ciphertext transposition across stores or keys via context-bound AAD", async () => {
     const key = await generateAesKey();
     const middleware = createEncryptionMiddleware(key, ["secret"]);
