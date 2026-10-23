@@ -370,6 +370,9 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
    * @returns Current QueryBuilder for chaining.
    */
   offset(count: number): this {
+    if (!Number.isInteger(count) || count < 0) {
+      throw new RangeError("Query offset must be a non-negative integer.");
+    }
     this.ast.offsetCount = count;
     return this;
   }
@@ -381,6 +384,9 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
    * @returns Current QueryBuilder for chaining.
    */
   limit(count: number): this {
+    if (!Number.isInteger(count) || count < 0) {
+      throw new RangeError("Query limit must be a non-negative integer.");
+    }
     this.ast.limitCount = count;
     return this;
   }
