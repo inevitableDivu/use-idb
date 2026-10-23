@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
+  createDatabase,
   createEncryptionMiddleware,
   CryptographicContextUnavailableError,
+  MemoryStorageAdapter,
+  store,
 } from "../src";
 
 describe("Encryption Middleware & Cryptographic Hardening", () => {
@@ -48,6 +51,53 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
     const decrypted = (await middleware.afterRead?.(readCtx)) as typeof original;
     expect(decrypted.profile.secret.ssn).toBe("123-45-6789");
     expect(decrypted.financial.accountNumber).toBe(987654321);
+  });
+
+  it("round-trips encrypted fields through engine get, getAll, and query reads", async () => {
+    interface SecretRecord {
+      id: string;
+      secret: string;
+      label: string;
+    }
+
+    const key = await generateAesKey();
+    const original: SecretRecord = {
+      id: "record-1",
+      secret: "private value",
+      label: "visible metadata",
+    };
+    const db = createDatabase(
+      {
+        name: `encrypted-read-regression-${Date.now()}-${Math.random()}`,
+        version: 1,
+        stores: {
+          records: store<SecretRecord>()({ keyPath: "id" }),
+        },
+      },
+      {
+        storage: new MemoryStorageAdapter(),
+        middlewares: [createEncryptionMiddleware(key, ["secret"])],
+      },
+    );
+
+    await db.open();
+    try {
+      await db.put("records", original);
+
+      // The value persisted by the storage adapter must remain ciphertext at rest.
+      const persisted = (await db.storage.get("records", original.id)) as {
+        secret: { __encrypted?: boolean; ciphertext?: string };
+      };
+      expect(persisted.secret.__encrypted).toBe(true);
+      expect(persisted.secret.ciphertext).toBeTypeOf("string");
+
+      // Single-record, bulk, and query reads must all provide the same key AAD.
+      await expect(db.get("records", original.id)).resolves.toEqual(original);
+      await expect(db.getAll("records")).resolves.toEqual([original]);
+      await expect(db.query("records").toArray()).resolves.toEqual([original]);
+    } finally {
+      await db.destroy();
+    }
   });
 
   it("rejects ciphertext transposition across stores or keys via context-bound AAD", async () => {
