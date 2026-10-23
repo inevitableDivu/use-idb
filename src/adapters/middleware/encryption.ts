@@ -222,8 +222,11 @@ export function createEncryptionMiddleware(
     };
     return JSON.stringify(encode(key));
   }
-  
-  function computeAad(storeName: string, key: IDBValidKey | undefined, fieldPath: string): Uint8Array<ArrayBuffer> {
+  function computeAad(
+    storeName: string,
+    key: IDBValidKey | undefined,
+    fieldPath: string,
+  ): Uint8Array<ArrayBuffer> {
     const keyRepr = key !== undefined ? serializeAadKey(key) : "*";
     const aadStr = `v1:${storeName}:${keyRepr}:${fieldPath}`;
     const encoded = new TextEncoder().encode(aadStr);
