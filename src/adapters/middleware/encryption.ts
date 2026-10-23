@@ -239,6 +239,7 @@ function computeAad(storeName: string, key: IDBValidKey | undefined, fieldPath: 
     key: IDBValidKey | undefined,
     fieldPath: string,
   ): Uint8Array<ArrayBuffer> {
+    // oxlint-disable-next-line no-base-to-string -- Preserve the exact legacy AAD encoding for existing ciphertexts.
     const keyRepr = key !== undefined ? String(key) : "*";
     const encoded = new TextEncoder().encode(`v1:${storeName}:${keyRepr}:${fieldPath}`);
     const buffer = new ArrayBuffer(encoded.byteLength);
