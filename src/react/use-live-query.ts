@@ -94,7 +94,7 @@ export function useLiveQuery<T>(
         get(target, property, receiver) {
           if (property === "query") {
             return (name: string) => {
-              const builder = new QueryBuilder<Record<string, unknown>, unknown>(
+              const builder = new QueryBuilder<Record<string, unknown>>(
                 metadataStorage,
                 name,
                 target.middlewarePipeline,
