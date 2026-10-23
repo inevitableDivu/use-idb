@@ -24,7 +24,7 @@ export type { WriteCoalescerOptions } from "./core/write-coalescer";
 export { serializeKey, isValidKey, hashQuery } from "./core/key-serializer";
 
 // ── Ports ──
-export type { IStoragePort, IStorageTransaction, StorageBatchOp } from "./ports/storage.port";
+export type { IStoragePort, IStorageTransaction, StorageBatchOp, StorageEntry } from "./ports/storage.port";
 export type { ISyncPort, MutationEnvelope } from "./ports/sync.port";
 export type { ILockPort } from "./ports/lock.port";
 export type { IDBMiddleware } from "./ports/middleware.port";
