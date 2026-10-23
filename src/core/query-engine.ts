@@ -418,8 +418,27 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
 
     if (this.middleware) {
       const transformed: T[] = [];
+      const keyPath = this.storeConfig?.keyPath;
       for (const item of results) {
-        const processed = await this.middleware.runAfterRead(this.ast.storeName, item);
+        // AES-GCM middleware binds ciphertext to the primary key through AAD.
+        // Preserve that context for bulk/cursor reads just like Engine.get().
+        let key: IDBValidKey | undefined;
+        if (keyPath !== undefined && item !== null && typeof item === "object") {
+          const paths: readonly string[] =
+            typeof keyPath === "string" ? [keyPath] : (keyPath as readonly string[]);
+          const parts = paths.map((path) => {
+            let current: unknown = item;
+            for (const part of path.split(".")) {
+              if (current === null || typeof current !== "object") return undefined;
+              current = (current as Record<string, unknown>)[part];
+            }
+            return current;
+          });
+          const candidate = Array.isArray(keyPath) ? parts : parts[0];
+          if (isValidKey(candidate)) key = candidate;
+        }
+
+        const processed = await this.middleware.runAfterRead(this.ast.storeName, item, key);
         transformed.push(processed as T);
       }
       results = transformed;
