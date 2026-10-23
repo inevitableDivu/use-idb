@@ -300,34 +300,34 @@ export class IndexedDBStorageAdapter implements IStoragePort {
       (db) =>
         new Promise<StorageEntry<T>[]>((resolve, reject) => {
           const tx = db.transaction(storeName, "readonly");
-          const target = indexName
-            ? tx.objectStore(storeName).index(indexName)
-            : tx.objectStore(storeName);
+          const objectStore = tx.objectStore(storeName);
+          const source = indexName ? objectStore.index(indexName) : objectStore;
           const keyRange = range instanceof IDBKeyRange ? range : (range ?? null);
-          const valuesRequest = target.getAll(keyRange, limit);
-          const keysRequest = target.getAllKeys(keyRange, limit);
-          let values: T[] | undefined;
-          let keys: IDBValidKey[] | undefined;
+          const req = source.openCursor(keyRange);
+          const results: StorageEntry<T>[] = [];
 
-          const completeIfReady = () => {
-            if (!values || !keys) return;
-            if (values.length !== keys.length) {
-              reject(new DOMException("IndexedDB returned mismatched keys and values", "DataError"));
+          req.onsuccess = () => {
+            const cursor = req.result;
+            if (!cursor) {
+              resolve(results);
               return;
             }
-            resolve(values.map((value, index) => ({ key: keys![index]!, value })));
+
+            // For index cursors, cursor.key is the index key; primaryKey is
+            // the actual object-store key required by encryption AAD.
+            results.push({
+              key: cursor.primaryKey,
+              value: cursor.value as T,
+            });
+
+            if (limit !== undefined && results.length >= limit) {
+              resolve(results);
+              return;
+            }
+            cursor.continue();
           };
 
-          valuesRequest.onsuccess = () => {
-            values = valuesRequest.result as T[];
-            completeIfReady();
-          };
-          keysRequest.onsuccess = () => {
-            keys = keysRequest.result as IDBValidKey[];
-            completeIfReady();
-          };
-          valuesRequest.onerror = () => reject(valuesRequest.error);
-          keysRequest.onerror = () => reject(keysRequest.error);
+          req.onerror = () => reject(req.error);
           tx.onerror = () => reject(tx.error);
           tx.onabort = () => reject(tx.error ?? new DOMException("Read transaction aborted", "AbortError"));
         }),
