@@ -296,6 +296,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
     range?: IDBKeyRange | IDBValidKey,
     limit?: number,
   ): Promise<StorageEntry<T>[]> {
+    if (limit !== undefined && limit <= 0) return Promise.resolve([]);
     return this.executeWithRetry(
       (db) =>
         new Promise<StorageEntry<T>[]>((resolve, reject) => {
@@ -556,6 +557,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
   }
 
   async cursorWithKeys<T>(ast: QueryAST<T>): Promise<StorageEntry<T>[]> {
+    if (ast.limitCount !== undefined && ast.limitCount <= 0) return [];
     // Fast-path: no JS filter, direction='next', offset=0 -> native getAll.
     const canUseFastPath =
       !ast.filterPredicate && ast.direction === "next" && ast.offsetCount === 0;
