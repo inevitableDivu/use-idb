@@ -290,9 +290,27 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
   ): Promise<StoreValue<TSchema, K>[]> {
     const results = await this.storage.getAll<StoreValue<TSchema, K>>(storeName);
     const transformed: StoreValue<TSchema, K>[] = [];
+    const keyPath = this.schema.stores[storeName]?.keyPath;
     for (const value of results) {
+      // Field-encryption middleware authenticates ciphertext against the primary key.
+      // Bulk reads must supply the same key context as Engine.get().
+      let key: IDBValidKey | undefined;
+      if (keyPath !== undefined && value !== null && typeof value === "object") {
+        const paths: readonly string[] =
+          typeof keyPath === "string" ? [keyPath] : (keyPath as readonly string[]);
+        const parts = paths.map((path) => {
+          let current: unknown = value;
+          for (const part of path.split(".")) {
+            if (current === null || typeof current !== "object") return undefined;
+            current = (current as Record<string, unknown>)[part];
+          }
+          return current;
+        });
+        const candidate = Array.isArray(keyPath) ? parts : parts[0];
+        if (isValidKey(candidate)) key = candidate;
+      }
       transformed.push(
-        (await this.middlewarePipeline.runAfterRead(storeName, value)) as StoreValue<TSchema, K>,
+        (await this.middlewarePipeline.runAfterRead(storeName, value, key)) as StoreValue<TSchema, K>,
       );
     }
     return transformed;
