@@ -176,6 +176,22 @@ export function useRecord<T extends object = Record<string, unknown>>(
   const set = useCallback(
     async (val: T) => {
       if (!isKeyDefined) throw new Error("Cannot set record with undefined key");
+      const keyPath = engine.schema.stores[storeName]?.keyPath;
+      if (keyPath !== undefined && val !== null && typeof val === "object") {
+        const paths = typeof keyPath === "string" ? [keyPath] : keyPath;
+        const parts = paths.map((path) => {
+          let current: unknown = val;
+          for (const segment of path.split(".")) {
+            if (current === null || typeof current !== "object") return undefined;
+            current = (current as Record<string, unknown>)[segment];
+          }
+          return current;
+        });
+        const inlineKey = Array.isArray(keyPath) ? parts : parts[0];
+        if (inlineKey !== undefined && toKeyString(inlineKey) !== toKeyString(key)) {
+          throw new Error("Record inline key does not match the key tracked by useRecord");
+        }
+      }
       await engine.put(storeName, val, key, { optimistic });
     },
     [engine, storeName, key, isKeyDefined, optimistic],
