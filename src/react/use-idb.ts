@@ -208,7 +208,7 @@ export function useIdb<T>(key: string, options?: UseIdbOptions<T>): UseIdbReturn
         if (queues.get(queueKey) === operation) queues.delete(queueKey);
       }
     },
-    [engine, storeName, key, snapshot.data, options?.defaultValue, options?.optimistic],
+    [engine, storeName, key, options?.defaultValue, options?.optimistic],
   );
 
   const remove = useCallback(async () => {
