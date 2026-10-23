@@ -1,590 +1,257 @@
-<div align="center">
+# use-idb
 
-# ⚡ use-idb
+**Typed, reactive IndexedDB for React 18+ and TypeScript.** Build browser-persistent features with a schema-first database API, live React hooks, typed queries, and optional encryption—without maintaining a separate state cache yourself.
 
-**Reactive, typed IndexedDB storage for React 18+ and TypeScript.**  
-_Small runtime surface • Typed schemas • React external-store integration_
+<p align="left">
+  <a href="https://www.npmjs.com/package/@inevitable_divu/use-idb"><img src="https://img.shields.io/npm/v/%40inevitable_divu%2Fuse-idb?label=npm" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@inevitable_divu/use-idb"><img src="https://img.shields.io/npm/dm/%40inevitable_divu%2Fuse-idb?label=downloads" alt="npm downloads"></a>
+  <a href="https://github.com/inevitableDivu/use-idb/actions/workflows/ci.yml"><img src="https://github.com/inevitableDivu/use-idb/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/inevitableDivu/use-idb/blob/main/LICENSE"><img src="https://img.shields.io/github/license/inevitableDivu/use-idb" alt="MIT license"></a>
+</p>
 
-[![CI](https://github.com/inevitableDivu/use-idb/actions/workflows/ci.yml/badge.svg)](https://github.com/inevitableDivu/use-idb/actions/workflows/ci.yml)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8%20Strict-blue?style=flat-square)](https://www.typescriptlang.org/)
-[![React](https://img.shields.io/badge/React-18%2B-61dafb?style=flat-square)](https://react.dev/)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success?style=flat-square)](https://github.com/inevitableDivu/use-idb)
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+- **Quick start:** install the package and build a typed, reactive list in a few minutes.
+- **Full guide:** schema design, CRUD, querying, hooks, configuration, migrations, encryption, and operational behavior are covered below.
+- **Runnable examples:** see the <a href="./examples/">examples directory</a> and <a href="./examples/README.md">examples guide</a>.
+- **Release notes:** see the <a href="./CHANGELOG.md">changelog</a>.
 
-[Features](#-key-features) • [Architecture](#-architecture) • [Getting Started](#-getting-started) • [Fluent Query Engine](#-fluent-query-engine-enginequery) • [React Hooks API](#-react-hooks-api) • [Security & Encryption](#-security--field-level-encryption) • [Performance characteristics](#-performance-characteristics)
+> **What this is:** a client-side storage and React reactivity layer built on IndexedDB. It is not a server database, a cloud-sync service, or a conflict-resolution system. Your application remains responsible for authentication, server synchronization, validation, and multi-writer conflict handling.
 
-</div>
+## Contents
 
----
+- [Why use-idb](#why-use-idb)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Simple key-value state](#simple-key-value-state)
+- [Define a database and stores](#define-a-database-and-stores)
+- [CRUD and transactions](#crud-and-transactions)
+- [Queries](#queries)
+- [React hooks](#react-hooks)
+- [Runtime configuration](#runtime-configuration)
+- [Schema migrations](#schema-migrations)
+- [Encryption and security](#encryption-and-security)
+- [Storage, lifecycle, and performance](#storage-lifecycle-and-performance)
+- [Troubleshooting](#troubleshooting)
+- [API overview](#api-overview)
+- [License](#license)
 
-## 💡 Why `use-idb`?
+## Why use-idb
 
-`use-idb` combines a typed IndexedDB API with React subscriptions so applications can read persisted records reactively without managing a separate state cache and invalidation layer.
+IndexedDB is asynchronous and useful for persistent browser data, but connecting it to a React UI usually requires extra code for caching, loading states, subscriptions, invalidation, and concurrent writes. The package brings those pieces together.
 
-The package pairs a storage-adapter core with a synchronous L1 snapshot cache, microtask write coalescing, optional AES-GCM field encryption, and React Suspense integration. It provides local persistence and cross-tab invalidation; application-level offline synchronization and conflict resolution remain the application’s responsibility.
+- **Typed schemas:** infer store names, record types, keys, and index values from your definitions.
+- **Reactive reads:** <code>useRecord</code> and <code>useLiveQuery</code> subscribe to cached data through React's <code>useSyncExternalStore</code>.
+- **Committed writes:** write promises resolve after the underlying storage transaction commits; failed writes reject.
+- **Batched writes:** compatible writes queued in the same microtask can share a transaction.
+- **IndexedDB queries:** fluent filters, indexes, key ranges, cursor direction, pagination, projections, and query-plan inspection.
+- **Cross-tab invalidation:** tabs notify each other that data changed; each tab refreshes from its own database.
+- **Optional AES-GCM middleware:** encrypt selected fields using the Web Crypto API.
+- **Pluggable infrastructure:** custom storage, sync, and lock adapters; bounded cache configuration; diagnostics; optional memory fallback.
+- **Rich values:** the built-in serializer supports values including <code>Date</code>, <code>BigInt</code>, <code>Map</code>, <code>Set</code>, <code>ArrayBuffer</code>, typed arrays, <code>DataView</code>, <code>undefined</code>, and special numeric values.
 
----
+The package has root, <code>./react</code>, and <code>./core</code> exports. React is a peer dependency (<code>react &gt;=18</code>).
 
-## 🚀 Key Features
+## Installation
 
-- **⚡ Microtask Write Coalescer**: Coalesces compatible queued writes per object store into atomic IndexedDB batches. Actual throughput gains depend on workload and browser.
-- **🔄 L1 Synchronous Memory Cache**: Provides stable synchronous snapshots through `useSyncExternalStore`, designed to work with concurrent React rendering.
-- **🛡️ AES-GCM Field Encryption**: Optional field-level encryption with authenticated additional data that binds ciphertext to its store, field, and primary key when the key is available.
-- **🔑 Pluggable KeyRing**: Keep prior keys for reading old ciphertext while selecting a new primary key for future writes; existing data is re-encrypted only when rewritten.
-- **📦 Rich Serialization**: The built-in versioned serializer supports `Date`, `BigInt`, `ArrayBuffer`, typed arrays, `DataView`, `Map`, `Set`, `undefined`, and special numeric values.
-- **🌐 Cross-Tab Invalidation**: Broadcasts versioned invalidation hints via `BroadcastChannel`; receiving tabs re-read their own IndexedDB database.
-- **🔒 WebLocks Upgrade Coordination**: Uses `navigator.locks` when available to coordinate database opening and schema upgrades, with a no-op adapter where unsupported.
-- **🎯 End-to-End Type Inference**: `store<T>()` carries model, primary-key, index, query, CRUD, and React hook types from the config literal.
-- **⏳ Suspense Integration**: `useLiveQuery` can suspend while its initial query is loading, with data snapshots still exposed through the regular hook contract.
-- **🪶 Modular Package Exports**: Root, React, and core subpath exports with `"sideEffects": false` to support tree-shaking.
+Choose your package manager:
 
----
-
-## 🏛️ Architecture
-
-`use-idb` implements a **Pragmatic Hexagonal Architecture** separating domain synchronization and caching from browser storage ports.
-
-```mermaid
-flowchart TD
-    subgraph UI ["React 19 Application Layer"]
-        Factory["createDatabaseHooks(db)"]
-        Hooks["useRecord() • useLiveQuery() • useMutation() • useIDBStatus()"]
-    end
-
-    subgraph Core ["Engine Core (Orchestrator)"]
-        L1["L1 Cache (useSyncExternalStore Snapshot)"]
-        Coalescer["Microtask Write Coalescer (Atomic Batching)"]
-        Tracker["Dependency Tracker & Invalidation"]
-    end
-
-    subgraph Ports ["Hexagonal Ports & Middleware"]
-        Crypto["AES-GCM NIST AAD + KeyRing Rotation"]
-        Serializer["Rich Binary Serializer (Date, Map, Set, BigInt)"]
-        LockPort["Lock Port (WebLocks Adapter)"]
-        SyncPort["Sync Port (BroadcastChannel Adapter)"]
-        StoragePort["Storage Port (IndexedDB / Memory Adapter)"]
-    end
-
-    UI --> Core
-    Core --> Ports
-```
-
----
-
-## 📦 Installation
-
-```bash
-pnpm add @inevitable_divu/use-idb
-# or
+~~~bash
 npm install @inevitable_divu/use-idb
 # or
+pnpm add @inevitable_divu/use-idb
+# or
 yarn add @inevitable_divu/use-idb
-```
+~~~
 
----
+For React hooks, your application must also have React installed. This package ships TypeScript declarations.
 
-## 🛠️ Getting Started
+## Quick start
 
-### 1. Rapid Prototyping (Zero Configuration)
+This example creates a typed <code>todos</code> store and a React component that automatically refreshes when matching records change. It uses the public package export and can be adapted to a Vite, Next.js, or other React application.
 
-Need a fast, reactive key-value store with no boilerplate? Use `useIdb` directly:
+### 1. Define the database
 
-```tsx
-import { useIdb } from "@inevitable_divu/use-idb";
+Create <code>src/db.ts</code>:
 
-function ThemeToggle() {
-  const { value: theme, setValue: setTheme } = useIdb<"light" | "dark">("app-theme", {
-    defaultValue: "light",
-  });
-
-  return (
-    <button onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
-      Current Theme: {theme}
-    </button>
-  );
-}
-```
-
----
-
-### 2. Inferred Store Definitions & Hook Factory (Recommended)
-
-Declare each model once in the runtime config. Store names, model fields, keys, index values, query results, and bound React hooks are inferred from that declaration:
-
-```tsx
+~~~ts
 import { createDatabase, createDatabaseHooks, store } from "@inevitable_divu/use-idb";
 
-// 1. Define Entity Models
-export interface User {
+export interface Todo {
   id: string;
-  name: string;
-  email: string;
-  role: "admin" | "user";
+  title: string;
+  done: boolean;
   createdAt: Date;
 }
 
-// 2. Configure stores and initialize the database. `store<User>()` preserves
-//    the model fields, the inferred string key, and literal index names.
 export const db = createDatabase({
-  name: "app-db",
+  name: "my-app",
   version: 1,
   stores: {
-    users: store<User>()({
+    todos: store<Todo>()({
       keyPath: "id",
       indexes: {
-        by_role: "role",
-        by_email: { keyPath: "email", unique: true },
+        by_done: "done",
+        by_created: "createdAt",
       },
     }),
   },
 });
 
-// 3. The database instance supplies all type information to its hooks.
-export const { useRecord, useLiveQuery, useMutation, useIDBStatus } = createDatabaseHooks(db);
-```
+export const { useLiveQuery, useMutation, useRecord, useIDBStatus } =
+  createDatabaseHooks(db);
+~~~
 
-For a common single-field `id` key, the direct call form is also available:
+The <code>name</code> identifies this database in the browser, and <code>version</code> controls schema upgrades. Store definitions are persistent schema: changing the primary key configuration of an existing store requires a migration (see [Schema migrations](#schema-migrations)).
 
-```ts
-products: store<Product>({
-  keyPath: "id",
-  indexes: { by_name: "name" },
-});
-```
+### 2. Use it in a component
 
-### Practical examples
+Create <code>src/TodoList.tsx</code>:
 
-The [`examples/`](./examples/) folder contains ten end-to-end starting points:
-typed CRUD and queries, reactive React lists, multi-entry indexes, offline
-sync, compound keys, schema migrations, atomic multi-store transactions,
-encrypted fields, cross-tab updates, and bulk backup/restore. See the
-[examples guide](./examples/README.md) for setup and security notes.
+~~~tsx
+import { useLiveQuery, useMutation } from "./db";
 
-Use the curried form when you want exact literal index-name inference or a custom/compound key path:
-
-```ts
-memberships: store<Membership>()({ keyPath: ["organizationId", "memberId"] });
-```
-
-This is a breaking change from manually authored `DatabaseSchema` interfaces; update existing configs to use typed stores. The optional `db.from("users")`/`db.table("users")` accessor is not part of this API.
-
----
-
-## 🔍 Fluent Query Engine (`engine.query`)
-
-The core engine features a type-safe, fluent query builder that compiles down to native `IDBIndex`, `IDBKeyRange`, and zero-allocation `IDBCursor` advances.
-
-```typescript
-const query = db.query("users");
-```
-
-### 1. Indexed Lookups & Key Ranges
-
-Chain `.where(indexName)` with native key range operations:
-
-```typescript
-// Exact key match on an index (IDBKeyRange.only)
-const admins = await db.query("users").where("role").equals("admin").toArray();
-
-// Bounded range query (IDBKeyRange.bound)
-// between(lower, upper, lowerOpen?, upperOpen?)
-const youngAdults = await db.query("users").where("age").between(18, 30).toArray();
-
-// Open-ended lower bound (IDBKeyRange.lowerBound)
-const seniors = await db.query("users").where("age").above(65).toArray();
-
-// Open-ended upper bound (IDBKeyRange.upperBound)
-const minors = await db.query("users").where("age").below(18).toArray();
-```
-
-### 2. Cursor Sorting, Ordering & Unique Keys
-
-Control direction using IndexedDB cursor modes:
-
-```typescript
-// Traverse descending (reverse chronological order)
-const latestLogins = await db
-  .query("users")
-  .where("lastLogin")
-  .direction("prev")
-  .limit(10)
-  .toArray();
-
-// Retrieve distinct values using "nextunique" or "prevunique"
-const uniqueRoles = await db.query("users").where("role").direction("nextunique").toArray();
-```
-
-### 3. Pagination with Zero-Allocation Skip (`offset` & `limit`)
-
-Avoid reading unused records into JavaScript memory. `offset(n)` uses native `cursor.advance(n)` to skip directly to the target record before fetching:
-
-```typescript
-function getPage(pageNumber: number, pageSize: number = 20) {
-  return db
-    .query("users")
-    .where("role")
-    .equals("customer")
-    .offset((pageNumber - 1) * pageSize)
-    .limit(pageSize)
-    .toArray();
-}
-```
-
-### 4. High-Speed Native Counts vs. Filtered Counts
-
-- When no JavaScript filter is applied, `.count()` automatically uses native `IDBIndex.count()` or `IDBObjectStore.count()` without iterating over records or allocating memory.
-- When an in-memory `.filter()` is applied, it streams records through the predicate:
-
-```typescript
-// Fast-path: Native IDB count (0ms overhead)
-const totalAdmins = await db.query("users").where("role").equals("admin").count();
-
-// Post-cursor in-memory JavaScript filter
-const verifiedAdmins = await db
-  .query("users")
-  .where("role")
-  .equals("admin")
-  .filter((user) => user.email.endsWith("@company.com"))
-  .count();
-```
-
-### 5. Fetch Single Match (`first()`)
-
-Retrieves the first matching record or `undefined`:
-
-```typescript
-const primaryAdmin = await db.query("users").where("role").equals("admin").first();
-```
-
----
-
-## 📖 React Hooks API
-
-`use-idb` provides both zero-config standalone hooks and factory-generated schema-bound hooks.
-
-### 1. Single Record Management (`useRecord`)
-
-Synchronous read backed by L1 memory cache, optimistic write overlays, and partial shallow patches:
-
-```tsx
-function UserCard({ userId }: { userId: string }) {
-  const { data: user, isLoading, isFetching, patch, set, remove } = useRecord("users", userId);
-
-  if (isLoading) return <div>Loading user...</div>;
-  if (!user) return <div>User not found</div>;
-
-  return (
-    <div>
-      <h3>
-        {user.name} ({user.role})
-      </h3>
-      {/* Shallow patch updates only specified keys */}
-      <button onClick={() => patch({ role: "admin" })}>Promote to Admin</button>
-      {/* Full update replaces record */}
-      <button onClick={() => set({ ...user, name: "New Name" })}>Rename</button>
-      {/* Deletes record from IDB and cache */}
-      <button onClick={() => remove()}>Delete User</button>
-    </div>
-  );
-}
-```
-
-### 2. Auto-Subscribing Queries (`useLiveQuery`)
-
-Live queries track dependencies automatically. Whenever matching keys or stores mutate (locally or in another browser tab), `useSyncExternalStore` triggers an instant, tear-free re-render:
-
-```tsx
-function FilteredUserList({ minAge }: { minAge: number }) {
-  // Pass dependency array to re-run query when parameters change
+export function TodoList() {
   const {
-    data: users = [],
+    data: todos = [],
     isLoading,
-    isFetching,
+    error,
     refetch,
   } = useLiveQuery(
-    (engine) => engine.query("users").where("age").above(minAge).toArray(),
-    [minAge],
+    (database) =>
+      database
+        .query("todos")
+        .where("by_done")
+        .equals(false)
+        .orderBy("createdAt", "desc")
+        .toArray(),
+    [],
   );
 
-  return (
-    <div>
-      <button onClick={() => refetch()}>Force Refresh</button>
-      <ul>
-        {users.map((u) => (
-          <li key={u.id}>
-            {u.name} — Age {u.age}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-```
+  const { put, deleteRecord, isPending } = useMutation("todos");
 
-### 3. React 19 `<Suspense>` Mode
-
-Eliminate loading boilerplate by enabling native React 19 Suspense contracts:
-
-```tsx
-function SuspendedUserList() {
-  const { data: users } = useLiveQuery((engine) => engine.query("users").toArray(), [], {
-    suspense: true,
-  });
-
-  return (
-    <ul>
-      {users.map((u) => (
-        <li key={u.id}>{u.name}</li>
-      ))}
-    </ul>
-  );
-}
-
-// In parent tree:
-<Suspense fallback={<SkeletonLoader />}>
-  <SuspendedUserList />
-</Suspense>;
-```
-
-### 4. Mutations & Cross-Store Atomic Transactions (`useMutation`)
-
-Execute concurrent mutations without transaction conflicts. Multiple writes inside the same tick are automatically coalesced:
-
-```tsx
-function BulkImportButton() {
-  const { put, bulkPut, remove, clearStore, transaction, isPending, error } = useMutation("users");
-
-  const handleImport = async (records: User[]) => {
-    // Coalesced into non-blocking chunked writes
-    await bulkPut(records.map((user) => ({ key: user.id, value: user })));
-  };
-
-  const handleDelete = async (userId: string) => {
-    await remove(userId);
-  };
-
-  const handleAtomicTransfer = async () => {
-    // Cross-store atomic ACID transaction with rollback on throw
-    await transaction(["users", "audit_logs"], "readwrite", async (tx) => {
-      const user = await tx.get<User>("users", "u_1");
-      if (user) {
-        await tx.put("audit_logs", { event: "MODIFIED", user: user.id, at: Date.now() });
-      }
+  async function addTodo() {
+    await put({
+      id: crypto.randomUUID(),
+      title: "Read the use-idb guide",
+      done: false,
+      createdAt: new Date(),
     });
-  };
+  }
+
+  if (isLoading) return <p>Loading todos…</p>;
+  if (error) return <p role="alert">Could not load todos: {error.message}</p>;
 
   return (
-    <div>
-      {error && <p className="error">Mutation failed: {error.message}</p>}
-      <button disabled={isPending} onClick={handleAtomicTransfer}>
-        {isPending ? "Executing..." : "Run Atomic Transfer"}
+    <section>
+      <button
+        disabled={isPending}
+        onClick={() => void addTodo().catch(console.error)}
+      >
+        Add todo
       </button>
-    </div>
-  );
-}
-```
+      <button onClick={() => void refetch()}>Refresh</button>
 
-### 5. Telemetry & Connection Lifecycle (`useIDBStatus`)
-
-Exposes real-time connection state, storage quota, and graceful downgrade detection (e.g. private browsing mode):
-
-```tsx
-function StorageTelemetryBanner() {
-  const {
-    connectionState, // "CONNECTING" | "OPEN" | "CLOSING" | "CLOSED" | "BLOCKED" | "CORRUPTED"
-    isFallbackMode, // true if running on in-memory storage fallback
-    isUpgradeBlocked, // true if another tab is blocking schema upgrade
-    requiresReloadForUpgrade, // true if another tab upgraded schema and connection was released
-    quota, // { usageBytes, quotaBytes, percentUsed, isPersisted }
-    reconnect, // recovery callback to cleanly re-establish connection
-  } = useIDBStatus();
-
-  return (
-    <aside>
-      <span>Status: {connectionState}</span>
-      {isFallbackMode && <span>⚠️ Private mode: in-memory fallback active</span>}
-      {isUpgradeBlocked && <span>⚠️ Please close other tabs to complete database upgrade</span>}
-      {requiresReloadForUpgrade && (
-        <button onClick={() => window.location.reload()}>Reload App</button>
+      {todos.length === 0 ? (
+        <p>No open todos yet.</p>
+      ) : (
+        <ul>
+          {todos.map((todo) => (
+            <li key={todo.id}>
+              {todo.title}
+              <button
+                disabled={isPending}
+                onClick={() =>
+                  void deleteRecord(todo.id).catch(console.error)
+                }
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
-      {quota.percentUsed != null && <span>Storage: {quota.percentUsed.toFixed(1)}% used</span>}
-    </aside>
+    </section>
   );
 }
-```
+~~~
 
-### 6. React Context Architecture (`IndexedDBProvider`)
+That's the basic workflow: define a store, query it in a hook, and write through a mutation. The live query tracks its store dependencies and re-renders after local changes and supported cross-tab invalidations. Production applications should handle mutation failures with their own user-facing error state instead of only logging them.
 
-Optionally inject a shared engine instance throughout your component tree:
+## Simple key-value state
 
-```tsx
-import { IndexedDBProvider, createDatabase } from "@inevitable_divu/use-idb";
+For a single preference or other small key-value use case, you can use <code>useIdb</code> without defining a schema or hook factory:
 
-const db = createDatabase({
-  name: "custom-db",
-  version: 1,
-  stores: { items: { keyPath: "id" } },
-});
+~~~tsx
+import { useIdb } from "@inevitable_divu/use-idb";
 
-export function App() {
+export function ThemeToggle() {
+  const { value: theme = "light", setValue, loading, error } =
+    useIdb<"light" | "dark">("app-theme", { defaultValue: "light" });
+
+  if (error) return <p role="alert">{error.message}</p>;
+
   return (
-    <IndexedDBProvider client={db}>
-      <YourApplication />
-    </IndexedDBProvider>
+    <button
+      disabled={loading}
+      onClick={() =>
+        void setValue((current) =>
+          current === "dark" ? "light" : "dark",
+        ).catch(console.error)
+      }
+    >
+      Theme: {theme}
+    </button>
   );
 }
-```
+~~~
 
----
+By default, <code>useIdb</code> uses the shared database named <code>__use_idb_default__</code> and the <code>keyval</code> object store. You can specify another <code>storeName</code>. Its result contains <code>value</code>, <code>setValue</code>, <code>remove</code>, <code>loading</code>, and <code>error</code>.
 
-## 🔐 Security & Field-Level Encryption
+Use the schema-based API for applications with multiple entities, indexes, typed queries, migrations, or more explicit storage configuration.
 
-`use-idb` provides field-level AES-GCM hardware-accelerated encryption using WebCrypto with zero runtime dependencies.
+## Define a database and stores
 
-### Transposition Defense (NIST SP 800-38D AAD)
+### Inline primary keys
 
-Plain AES-GCM allows an attacker with IndexedDB access to swap encrypted payloads between rows or stores. When a primary key is known before encryption, `use-idb` binds Authenticated Additional Data to each encryption tag, so moving new ciphertext to another store, key, or field fails authentication. New envelopes use a type-tagged canonical key encoding (`aadVersion: 2`) to avoid key-representation collisions, while old envelopes remain readable with the legacy encoding. Existing legacy ciphertext retains the security properties of its original AAD until rewritten. Envelopes include `keyBound` to record whether the primary key was available. If a write has no key yet (for example, an auto-generated key whose value is created by IndexedDB), the middleware uses `*` for the key component; that preserves readability but does **not** prevent ciphertext from being moved between records in the same store. Use an inline key path or pass an explicit key to `put` when per-record transposition protection is required.
+Use <code>store&lt;T&gt;()({...})</code> to declare a record shape and its key path. Index aliases can be simple field names or objects with index options.
 
-```tsx
-import { createDatabase, createEncryptionMiddleware } from "@inevitable_divu/use-idb";
+~~~ts
+import { createDatabase, store } from "@inevitable_divu/use-idb";
 
-// Generate or import CryptoKey
-const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
-  "encrypt",
-  "decrypt",
-]);
+interface User {
+  id: string;
+  email: string;
+  role: "admin" | "member";
+  tags: string[];
+  createdAt: Date;
+}
 
-const encryption = createEncryptionMiddleware(
-  key,
-  // Dotted nested paths are automatically resolved and encrypted in-place
-  ["profile.ssn", "financial.creditCard"],
-);
-
-const db = createDatabase(schema, {
-  middlewares: [encryption],
+export const db = createDatabase({
+  name: "users-db",
+  version: 1,
+  stores: {
+    users: store<User>()({
+      keyPath: "id",
+      indexes: {
+        by_email: { keyPath: "email", unique: true },
+        by_role: "role",
+        by_tag: { keyPath: "tags", multiEntry: true },
+        by_created: "createdAt",
+      },
+    }),
+  },
 });
-```
+~~~
 
-### Zero-Downtime Key Rotation (`KeyRing`)
+- <code>keyPath</code> identifies the primary key on each record. For a compound key, use a tuple such as <code>["workspaceId", "userId"]</code>.
+- <code>indexes</code> defines the secondary indexes you can query. Use <code>unique: true</code> when duplicates should be rejected.
+- <code>multiEntry: true</code> indexes each item in an array-valued property; it cannot be combined with a compound index key path.
+- Use stable database names and increase <code>version</code> when you need a schema upgrade.
 
-Rotate encryption keys on live clients without table rewrites:
+### Out-of-line primary keys
 
-```tsx
-const encryption = createEncryptionMiddleware(
-  {
-    primaryKeyId: "v2", // All writes encrypted with v2
-    keys: {
-      v1: legacyKey, // Legacy reads decrypted seamlessly with v1
-      v2: currentKey,
-    },
-  },
-  ["secret"],
-);
-```
+Use <code>outOfLineStore&lt;TItem, TKey&gt;()({...})</code> when the key is passed separately and is not stored on the record itself:
 
----
-
-## ⚡ Performance characteristics
-
-The package is designed to reduce avoidable database work, but performance depends on the browser, dataset, indexes, serialized value sizes, and query shape. The project does not currently publish a reproducible benchmark suite or enforce a bundle-size budget, so the following are implementation characteristics rather than numeric performance guarantees:
-
-| Area              | Current design                                                                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Writes            | Compatible operations queued within a microtask can share a readwrite transaction.                                                               |
-| React reads       | Stable cache snapshots avoid an asynchronous storage read during every render.                                                                   |
-| Query execution   | Indexed ranges and cursor APIs are used where the query plan permits them; JavaScript filters and `orderBy` may scan and sort results in memory. |
-| React consistency | Hooks use `useSyncExternalStore` to integrate the cache with React rendering.                                                                    |
-| Encryption        | Optional AES-GCM field encryption uses authenticated additional data when a primary key is available.                                            |
-
----
-
-## 🧪 Rigorous Verification & Chaos Testing
-
-Run `pnpm release:check` before cutting a release to run typechecking, lint,
-tests, the package build, and formatting checks. Use `pnpm release:dry-run` to
-also preview the files included by `pnpm pack`.
-
-Label each merged feature PR with exactly one of `release:patch`,
-`release:minor`, or `release:major` to have automation open or update a version
-bump PR. The version PR is opened using `GITHUB_TOKEN`; after it is reviewed
-and merged, manually create and push its matching `vMAJOR.MINOR.PATCH` tag to
-start the [npm publish workflow](./.github/workflows/publish.yml), which
-verifies the tag against `package.json` before publishing. For version
-`1.2.3`, run `git tag v1.2.3 && git push origin v1.2.3`. Create those three
-labels in GitHub first; PRs without a release label do not schedule a release.
-Generated release PRs use the
-[release checklist template](./.github/PULL_REQUEST_TEMPLATE/release.md).
-Before publishing, configure npm trusted publishing for this GitHub repository
-and the exact workflow file `.github/workflows/publish.yml`. The workflow
-publishes with provenance and does not require a long-lived npm token.
-
-- **32 Automated Tests** covering cryptographic transposition attacks, WebLocks upgrade exclusivity, zombie read eviction, optimistic rollback stacks, and React Suspense integration.
-- **Type-Aware Static Analysis** with `oxlint` and strict TypeScript compilation (`tsc --noEmit`).
-
-```bash
-# Run test suite
-pnpm test
-
-# Run strict type checking
-pnpm typecheck
-
-# Run linter
-pnpm lint
-```
-
----
-
----
-
-## Runtime guarantees and configuration notes
-
-### Schema and runtime configuration
-
-The schema contains durable structure—database name/version, stores, indexes, and migrations. Prefer the grouped runtime API for tuning how the engine runs. The old `schema.options` and `createDatabase(schema, { storage, sync, lock, middlewares })` forms remain supported for compatibility.
-
-```ts
-import { createDatabase, type DatabaseDiagnosticsConfig } from "@inevitable_divu/use-idb";
-
-const diagnostics: DatabaseDiagnosticsConfig = {
-  onEvent(event) {
-    // Send structured events to application telemetry. Record values and keys are never included.
-    console.debug("use-idb", event.type, event);
-  },
-  onError(error, context) {
-    console.error("use-idb operation failed", context.operation, error);
-  },
-};
-
-const db = createDatabase({
-  schema,
-  adapters: {
-    // storage: customStorage,
-    // sync: customSync,
-    // lock: customLock,
-  },
-  middleware: [],
-  cache: { maxEntries: 1_000, ttlMs: 60_000 },
-  writes: { coalesceWindowMs: 0 },
-  crossTab: { enabled: true },
-  fallback: {
-    strategy: "memory", // or "error" to require IndexedDB/custom storage
-    requestPersistentStorage: false,
-  },
-  diagnostics,
-});
-```
-
-The runtime groups are validated up front. Cache defaults are `maxEntries: 1000` and `ttlMs: 60000`; write coalescing defaults to the current microtask (`coalesceWindowMs: 0`). Active subscriptions may keep the cache above its configured soft capacity.
-
-Fallback is limited to recognized IndexedDB availability/security failures; migration, schema, version, quota, and transaction failures remain visible. Memory storage is volatile and process-local. `requestPersistentStorage` is a best-effort browser request; the grant is browser-controlled and available in `useIDBStatus().persistentStorageGranted`. If `fallback.strategy` is `"error"`, unsupported environments fail rather than silently using memory storage.
-
-Diagnostics are opt-in. Events describe lifecycle and committed-operation metadata, not record payloads or keys. Event/error callbacks are best-effort: exceptions thrown by telemetry callbacks are swallowed so they cannot change the outcome of a storage operation.
-
-### Typed out-of-line primary keys
-
-For records whose primary key is stored separately from the record value, use `outOfLineStore` to preserve key, record, and index types:
-
-```ts
+~~~ts
 import { createDatabase, outOfLineStore } from "@inevitable_divu/use-idb";
 
 interface AuditEvent {
@@ -592,7 +259,7 @@ interface AuditEvent {
   occurredAt: Date;
 }
 
-const db = createDatabase({
+const auditDb = createDatabase({
   name: "audit-db",
   version: 1,
   stores: {
@@ -602,34 +269,398 @@ const db = createDatabase({
   },
 });
 
-await db.put("events", { type: "created", occurredAt: new Date() }, "event-1");
-const event = await db.get("events", "event-1");
-```
+await auditDb.put("events", { type: "created", occurredAt: new Date() }, "event-1");
+const event = await auditDb.get("events", "event-1");
+~~~
 
-For records without middleware, `db.update(storeName, key, updater)` performs a synchronous update inside a short readwrite transaction. The updater must be synchronous and side-effect-free because the transaction can abort. This helper is intentionally unavailable when middleware is configured; use the middleware-aware CRUD/batch path instead.
+## CRUD and transactions
 
-Changing a store's primary `keyPath` or `autoIncrement` setting is not an in-place schema edit. Add a synchronous migration for the target database version that rebuilds the store and copies its data; the engine reports a `DatabaseMigrationError` if the schema changes without such a migration.
+The database instance exposes typed storage operations. These examples assume <code>db</code> has a <code>users</code> store.
 
-### Memory storage is volatile
+~~~ts
+// Insert or replace a record. Inline-key stores read the key from the record.
+await db.put("users", {
+  id: "u-1",
+  email: "ada@example.com",
+  role: "admin",
+  tags: ["engineering"],
+  createdAt: new Date(),
+});
 
-The memory adapter is process-local and non-durable. It supports staged atomic transactions, clone isolation, configured inline key paths, and unique indexes when the engine supplies a schema, but it cannot share its underlying data across browser tabs or survive a reload. Cross-tab invalidation is disabled when IndexedDB falls back to memory. Applications should check `useIDBStatus().isFallbackMode` and `fallbackReason` before assuming writes are persistent.
+// Read one record; a missing key returns undefined.
+const user = await db.get("users", "u-1");
 
-### Explicit transactions and middleware
+// Delete one record or clear the whole store.
+await db.delete("users", "u-1");
+await db.clear("users");
 
-Explicit `db.transaction()` calls are intentionally rejected when middleware is configured. Async middleware such as WebCrypto encryption cannot safely be awaited at arbitrary points inside an active IndexedDB transaction, and silently bypassing middleware would be unsafe. In this configuration, use the regular `get`/`put`/`delete`/batch APIs or restructure the operation so middleware is not required.
+// Read matching records through the query builder.
+const admins = await db.query("users").where("by_role").equals("admin").toArray();
+~~~
 
-IndexedDB transactions are short-lived. Within the callback, await operations belonging to the transaction; do not wait for network requests, timers, or unrelated asynchronous tasks before issuing more transaction requests. A write promise resolves only after its storage transaction commits. If a transaction aborts, the operation rejects and committed cache state is not published.
+A write resolves after the owning storage transaction commits. If the transaction aborts, the write rejects and committed cache state is not published.
 
-### Cross-tab notifications
+### Atomic operations across stores
 
-Cross-tab messages are versioned, validated invalidation notifications—not a durable replication log. Receivers refresh data from their own IndexedDB database. They do not transfer records or resolve multi-writer conflicts. Cross-tab sync is disabled when the engine switches to isolated in-memory storage.
+Use <code>db.transaction</code> when a set of changes must succeed or fail together:
 
-### Live query callbacks
+~~~ts
+await db.transaction(["inventory", "orders"], "readwrite", async (tx) => {
+  const item = await tx.get("inventory", "item-1");
+  if (!item || item.remaining < 1) {
+    throw new Error("Item is unavailable");
+  }
 
-A `useLiveQuery` callback is inspected to discover query dependencies and can be invoked again to fetch results. Keep it pure: it should describe a query, not perform writes, emit analytics, or cause external side effects. Supply `queryKey` when closure state affects the query result and cannot be fully represented by the supplied dependency list. Async custom query work may accept the optional second argument `({ signal })`; the signal is aborted when the query is superseded or its hook unmounts. Use it with `fetch` or other cancellable APIs to avoid wasted work.
+  await tx.put("inventory", { ...item, remaining: item.remaining - 1 });
+  await tx.put("orders", {
+    id: crypto.randomUUID(),
+    itemId: "item-1",
+    placedAt: new Date(),
+  });
+});
+~~~
 
-For diagnostics, provide `diagnostics: { onEvent, onError }` in the runtime configuration. For query performance investigations, call `db.query("store").where("index").equals(value).explain()` to inspect the selected access path, post-filter/sort behavior, and pagination strategy.
+Keep transaction callbacks focused on database work. IndexedDB transactions can become inactive while waiting for network requests, timers, or unrelated asynchronous tasks. Do not use this as a place to await remote API calls.
 
-## 📄 License
+**Middleware limitation:** explicit <code>db.transaction()</code> is rejected with <code>TransactionMiddlewareUnsupportedError</code> when middleware is configured. This prevents async middleware—such as Web Crypto encryption—from being silently bypassed or awaited unsafely inside a live IndexedDB transaction. For middleware-enabled databases, use the normal middleware-aware CRUD and batch operations or redesign the operation boundary.
+
+### Synchronous record updates
+
+For a database without middleware, <code>db.update(storeName, key, updater)</code> performs a short readwrite transaction with a synchronous updater. Keep the updater pure and synchronous; it can fail if the transaction aborts. This helper is unavailable when middleware is configured.
+
+## Queries
+
+Queries use IndexedDB stores, indexes, and cursors where possible. The fluent builder is typed from the store definition.
+
+~~~ts
+// Exact index match.
+const admins = await db.query("users").where("by_role").equals("admin").toArray();
+
+// A range on an index.
+const recentUsers = await db
+  .query("users")
+  .where("by_created")
+  .above(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
+  .toArray();
+
+// Filter query results further.
+const taggedAdmins = await db
+  .query("users")
+  .where("by_role")
+  .equals("admin")
+  .filter((user) => user.tags.includes("engineering"))
+  .toArray();
+
+// Sort, paginate, and count.
+const firstPage = await db.query("users").orderBy("createdAt", "desc").offset(0).limit(20).toArray();
+const totalAdmins = await db.query("users").where("by_role").equals("admin").count();
+const firstAdmin = await db.query("users").where("by_role").equals("admin").first();
+
+// Return only selected fields.
+const summaries = await db.query("users").select("id", "email").toArray();
+~~~
+
+### Query operators
+
+Use <code>where(fieldOrIndexName)</code> followed by one of:
+
+- **Matching:** <code>equals(value)</code>, <code>notEquals(value)</code>, <code>anyOf(values)</code>
+- **Ranges:** <code>gt(value)</code>, <code>gte(value)</code>, <code>lt(value)</code>, <code>lte(value)</code>, <code>between(lower, upper, includeLower?, includeUpper?)</code>, <code>above(value)</code>, <code>below(value)</code>, <code>startsWith(prefix)</code>
+- **Composition and post-processing:** <code>and(fieldOrIndexName)</code>, <code>filter(predicate)</code>, <code>orderBy(field, "asc" | "desc")</code>
+- **Traversal and results:** <code>direction("next" | "nextunique" | "prev" | "prevunique")</code>, <code>offset(count)</code>, <code>limit(count)</code>, <code>select(...fields)</code>, <code>toArray()</code>, <code>first()</code>, <code>count()</code>, <code>explain()</code>
+
+Prefer indexed fields for high-volume filtering. JavaScript <code>filter</code> predicates and some sort/pagination combinations may require reading or sorting results in memory. <code>explain()</code> reports the selected access path and whether filtering, sorting, or pagination requires post-processing.
+
+## React hooks
+
+Create hooks once at module scope with <code>createDatabaseHooks(db)</code>. The factory binds store names, record types, and key types to the database configuration.
+
+### <code>useRecord(storeName, key, options?)</code>
+
+Subscribe to one record. It returns <code>data</code>, <code>isLoading</code>, <code>isFetching</code>, <code>error</code>, <code>set(value)</code>, <code>patch(partial)</code>, and <code>remove()</code>.
+
+~~~tsx
+function UserName({ id }: { id: string }) {
+  const { data: user, isLoading, patch, error } = useRecord("users", id);
+
+  if (isLoading) return <p>Loading…</p>;
+  if (error) return <p role="alert">{error.message}</p>;
+  if (!user) return <p>User not found</p>;
+
+  return (
+    <button onClick={() => void patch({ role: "member" }).catch(console.error)}>
+      {user.email} — change role
+    </button>
+  );
+}
+~~~
+
+<code>set</code> replaces the record; <code>patch</code> applies a shallow patch to an existing record; <code>remove</code> deletes it. The optional <code>optimistic</code> setting controls whether the cache is updated before the write commits. The hook does not create a missing record just because you call <code>patch</code>.
+
+### <code>useLiveQuery(queryFn, deps, options?)</code>
+
+Subscribe to a query and re-render when tracked data changes. The result contains <code>data</code>, <code>isLoading</code>, <code>isFetching</code>, <code>error</code>, and <code>refetch()</code>.
+
+~~~tsx
+const result = useLiveQuery(
+  (database) => database.query("users").where("by_role").equals(role).toArray(),
+  [role],
+);
+~~~
+
+Treat the callback as a **pure query description**. It may be invoked more than once as dependencies are inspected and data is fetched. Do not perform writes, analytics, or other side effects inside it.
+
+For custom asynchronous work, pass an explicit <code>stores</code> list so changes to those stores invalidate the query; use the optional abort signal to cancel superseded work:
+
+~~~tsx
+const { data, error } = useLiveQuery(
+  async (_database, { signal }) => {
+    const response = await fetch("/api/suggestions", { signal });
+    if (!response.ok) throw new Error("Could not load suggestions");
+    return response.json() as Promise<string[]>;
+  },
+  [],
+  { stores: ["users"], queryKey: "user-suggestions" },
+);
+~~~
+
+Other options include <code>initialData</code>, <code>enabled</code>, <code>queryKey</code>, and <code>suspense</code>. Use <code>queryKey</code> to distinguish otherwise similar queries when captured state affects results.
+
+### <code>useMutation(storeName)</code>
+
+Provides <code>put</code>, <code>bulkPut</code>, <code>deleteRecord</code>, <code>remove</code>, and <code>clearStore</code>, together with <code>isPending</code> and <code>error</code>. The factory-generated mutation hook is scoped to one store. <code>bulkPut</code> writes in chunks; its default chunk size is 500 records.
+
+### <code>useIDBStatus()</code>
+
+Read storage and connection status, including <code>connectionState</code>, <code>isFallbackMode</code>, <code>fallbackReason</code>, <code>isUpgradeBlocked</code>, <code>requiresReloadForUpgrade</code>, and quota/persistence information. The result also includes <code>refreshQuota()</code> and <code>reconnect()</code>.
+
+Use status in your UI when persistence matters. A write to in-memory fallback storage is not equivalent to durable IndexedDB persistence.
+
+### React Suspense and context
+
+<code>useLiveQuery</code> supports an opt-in <code>{ suspense: true }</code> option. Place the component below a React <code>&lt;Suspense fallback={...}&gt;</code> boundary. Suspense is optional; the ordinary loading/error result contract remains available for non-Suspense use.
+
+<code>IndexedDBProvider</code> and <code>useDatabase</code> are available for applications that want to supply/read an engine through context. When using <code>createDatabaseHooks(db)</code>, the hooks are already bound to that instance.
+
+## Runtime configuration
+
+The recommended configuration separates the persistent schema from runtime behavior:
+
+~~~ts
+import { createDatabase, store } from "@inevitable_divu/use-idb";
+
+interface Draft {
+  id: string;
+  title: string;
+}
+
+const db = createDatabase({
+  schema: {
+    name: "drafts-db",
+    version: 1,
+    stores: {
+      drafts: store<Draft>()({ keyPath: "id" }),
+    },
+  },
+  cache: {
+    maxEntries: 1000,
+    ttlMs: 60_000,
+  },
+  writes: {
+    coalesceWindowMs: 0,
+  },
+  crossTab: {
+    enabled: true,
+  },
+  fallback: {
+    strategy: "error",
+    requestPersistentStorage: true,
+  },
+  diagnostics: {
+    onEvent(event) {
+      console.info("use-idb", event.type);
+    },
+    onError(error) {
+      console.error("use-idb", error);
+    },
+  },
+});
+~~~
+
+All groups are optional. Important settings:
+
+| Option | Purpose |
+| --- | --- |
+| <code>adapters</code> | Supply custom <code>storage</code>, <code>sync</code>, or <code>lock</code> adapters. |
+| <code>middleware</code> | Ordered middleware such as serialization or field encryption. |
+| <code>cache.maxEntries</code>, <code>cache.ttlMs</code> | Cache capacity and time-to-live. Defaults: 1,000 entries and 60,000 ms. Active subscriptions can keep the cache above the soft capacity. |
+| <code>writes.coalesceWindowMs</code> | Write coalescing window in milliseconds. Defaults to <code>0</code>, which coalesces writes queued in the same microtask. |
+| <code>crossTab.enabled</code> | Enable cross-tab invalidation; enabled by default. |
+| <code>fallback.strategy</code> | <code>"memory"</code> to allow volatile in-memory fallback, or <code>"error"</code> to fail if IndexedDB cannot be used. |
+| <code>fallback.requestPersistentStorage</code> | Ask the browser for persistent storage on a best-effort basis; the browser decides whether to grant it. |
+| <code>diagnostics</code> | Optional event/error callbacks. Exceptions thrown by diagnostics callbacks do not change storage outcomes. |
+
+The backward-compatible form <code>createDatabase(schema, { middlewares: [...] })</code> is also supported. In the grouped runtime API the option is named <code>middleware</code> (singular).
+
+Schema and migration failures are not silently converted into memory fallback. For applications where durability is required, consider <code>fallback: { strategy: "error" }</code> and expose storage status to users.
+
+## Schema migrations
+
+Increase the database <code>version</code> when adding or changing stores and indexes. Migrations run during the synchronous IndexedDB version-change transaction.
+
+~~~ts
+import { createDatabase, store } from "@inevitable_divu/use-idb";
+
+interface Profile {
+  id: string;
+  fullName: string;
+  displayName?: string;
+}
+
+const db = createDatabase({
+  name: "profiles-db",
+  version: 2,
+  stores: {
+    profiles: store<Profile>()({
+      keyPath: "id",
+      indexes: { by_display_name: "displayName" },
+    }),
+  },
+  migrations: {
+    2: ({ transaction }) => {
+      const profiles = transaction.objectStore("profiles");
+      const request = profiles.openCursor();
+
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+
+        const profile = cursor.value as Profile;
+        if (profile.displayName === undefined) {
+          cursor.update({ ...profile, displayName: profile.fullName });
+        }
+        cursor.continue();
+      };
+    },
+  },
+});
+~~~
+
+Key rules:
+
+- Keep migrations synchronous in the IndexedDB sense: use requests/cursors inside the version-change transaction; do not await network calls or unrelated promises.
+- Index definitions can be reconciled during an upgrade, but changing a store's primary <code>keyPath</code> or <code>autoIncrement</code> setting requires an explicit migration that rebuilds the store and copies the existing data.
+- Test upgrades from every schema version you support, not only a fresh database.
+- If another open tab prevents an upgrade, close/reload that tab and inspect <code>useIDBStatus()</code> for blocked-upgrade status.
+
+## Encryption and security
+
+<code>createEncryptionMiddleware</code> can encrypt selected fields with AES-GCM through the browser's Web Crypto API. It supports key rings so older ciphertext can be read while new writes use a new primary key.
+
+~~~ts
+import {
+  createDatabase,
+  createEncryptionMiddleware,
+  store,
+} from "@inevitable_divu/use-idb";
+
+interface PrivateNote {
+  id: string;
+  title: string;
+  secret: string;
+}
+
+export function createPrivateNotesDatabase(encryptionKey: CryptoKey) {
+  return createDatabase(
+    {
+      name: "private-notes",
+      version: 1,
+      stores: {
+        notes: store<PrivateNote>()({ keyPath: "id" }),
+      },
+    },
+    {
+      middlewares: [
+        createEncryptionMiddleware(encryptionKey, ["secret"]),
+      ],
+    },
+  );
+}
+~~~
+
+**Security responsibilities remain with the application:**
+
+- Manage keys separately from the encrypted records. Do not store the encryption key beside the ciphertext.
+- Plan key persistence, recovery, rotation, and loss behavior. An in-memory non-extractable key will not automatically survive a reload.
+- Encryption protects selected stored fields; it does not secure a compromised application runtime or replace authorization, XSS defenses, or server-side access controls.
+- Ciphertext is bound to store, field, and primary key when the key is available. For auto-generated keys that are not known before encryption, that per-record binding cannot provide the same protection against ciphertext being moved between records.
+- Middleware uses asynchronous transformations, so explicit <code>db.transaction()</code> and <code>db.update()</code> are intentionally unavailable with middleware configured. Use the regular middleware-aware mutation methods.
+
+See [encrypted private notes](./examples/encrypted-private-notes.ts) for a fuller example.
+
+## Storage, lifecycle, and performance
+
+### Browser storage and memory fallback
+
+IndexedDB is browser-managed storage and can be cleared by the user, browser settings, eviction, private browsing restrictions, or test environments. It is not a backup system.
+
+If configured to fall back to memory, the package uses volatile, process-local storage. Data in that mode is not durable across reloads and is not shared between tabs. Check <code>useIDBStatus().isFallbackMode</code> and <code>fallbackReason</code> before telling users that changes are safely persisted. Use <code>fallback.strategy: "error"</code> when silently switching to volatile storage would be unacceptable.
+
+The persistent-storage request is best effort. A request does not guarantee that a browser will grant persistence or retain data indefinitely.
+
+### Cross-tab behavior
+
+Cross-tab messages are versioned invalidation hints, not a replication log. A receiving tab refreshes from its own IndexedDB database; messages do not contain records and do not resolve conflicting simultaneous edits. Cross-tab invalidation is disabled while using isolated in-memory fallback storage.
+
+### Cache, optimistic updates, and writes
+
+The hooks use a synchronous cache snapshot to integrate with React rendering. Mutations can optimistically update this snapshot; the promise still indicates whether storage committed. Failed writes reject and optimistic changes are rolled back. Disable optimistic behavior for supported hooks if the UI should wait for persistence.
+
+Compatible writes queued in the same microtask may be combined into a transaction. This reduces overhead for some workloads, but throughput and latency depend on the browser, data size, indexes, and access pattern; the package does not promise a fixed performance improvement.
+
+### Server rendering
+
+IndexedDB is a browser API. During server rendering, hooks use server-safe snapshots rather than reading browser storage. Render an appropriate fallback and let the client hydrate/read persisted data. Do not treat IndexedDB contents as available to server components or as a server-side data store.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| Data seems to disappear after reload | Check whether the engine fell back to memory, whether the browser cleared storage, and whether the database name/version changed. |
+| An upgrade is blocked | Close other tabs running an older connection, then reload as needed. Inspect <code>isUpgradeBlocked</code> and <code>requiresReloadForUpgrade</code>. |
+| A query does not rerun when captured state changes | Include relevant values in the <code>deps</code> array and use <code>queryKey</code> when distinct query identities need to be represented. |
+| A live-query callback seems to run more than once | This is part of dependency discovery and fetching. Keep the callback pure and move side effects outside it. |
+| Writes fail with middleware enabled | Use CRUD/batch APIs. Explicit transactions and <code>db.update()</code> cannot run with middleware. |
+| TypeScript rejects a field or key | Define stores with <code>store&lt;T&gt;()({...})</code> or <code>outOfLineStore&lt;TItem, TKey&gt;()({...})</code> and query declared fields/indexes. |
+| React UI does not reflect a custom async query | Declare affected stores in <code>options.stores</code> and provide a stable <code>queryKey</code> when needed. Use the abort signal for cancellable work. |
+
+## API overview
+
+| API | Purpose |
+| --- | --- |
+| <code>createDatabase(schema)</code> | Create or retrieve an engine for a typed database schema. |
+| <code>store&lt;T&gt;()({...})</code> | Define a typed store with an inline primary key. |
+| <code>outOfLineStore&lt;TItem, TKey&gt;()({...})</code> | Define a typed store whose primary key is passed separately. |
+| <code>createDatabaseHooks(db)</code> | Create schema-bound React hooks. |
+| <code>useIdb(key, options?)</code> | Simple reactive key-value hook backed by the default database. |
+| <code>useRecord(store, key, options?)</code> | Subscribe to one record and set, patch, or remove it. |
+| <code>useLiveQuery(queryFn, deps, options?)</code> | Subscribe to query results. |
+| <code>useMutation(store)</code> | Perform store-scoped writes, batch writes, deletes, and clears. |
+| <code>useIDBStatus()</code> | Read connection, fallback, upgrade, and storage quota status. |
+| <code>db.get/put/delete/clear(...)</code> | Core CRUD operations. |
+| <code>db.query(store)</code> | Build a typed IndexedDB query. |
+| <code>db.transaction(stores, mode, callback)</code> | Run explicit atomic transaction work (without middleware). |
+| <code>createEncryptionMiddleware(key, fields)</code> | Encrypt selected fields through Web Crypto. |
+| <code>IndexedDBProvider</code> / <code>useDatabase</code> | Provide or access an engine through React context. |
+
+Imports are available from <code>@inevitable_divu/use-idb</code>; React-only APIs are also available from <code>@inevitable_divu/use-idb/react</code>, and core engine APIs from <code>@inevitable_divu/use-idb/core</code>.
+
+## Examples and release notes
+
+The [examples directory](./examples/) covers typed CRUD, live React lists, multi-entry indexes, offline outboxes, compound keys, schema migration, atomic multi-store updates, field encryption, cross-tab invalidation, and bulk import/export. Start with the [examples guide](./examples/README.md).
+
+For release-specific changes and migration notes, see the [changelog](./CHANGELOG.md). Bugs and feature requests belong in [GitHub Issues](https://github.com/inevitableDivu/use-idb/issues).
+
+## License
 
 MIT © [Divyansh Pandey](https://github.com/inevitableDivu)
