@@ -444,7 +444,7 @@ export function App() {
 
 ### Transposition Defense (NIST SP 800-38D AAD)
 
-Plain AES-GCM allows an attacker with IndexedDB access to swap encrypted payloads between rows or stores. `use-idb` binds Authenticated Additional Data (`v1:storeName:key:fieldPath`) to every encryption tag. Any payload transposition or tampering throws an immediate cryptographic authentication error.
+Plain AES-GCM allows an attacker with IndexedDB access to swap encrypted payloads between rows or stores. When a primary key is known before encryption, `use-idb` binds Authenticated Additional Data (`v1:storeName:key:fieldPath`) to each encryption tag, so moving ciphertext to another store, key, or field fails authentication. Envelopes include `keyBound` to record whether the primary key was available. If a write has no key yet (for example, an auto-generated key whose value is created by IndexedDB), the middleware uses `*` for the key component; that preserves readability but does **not** prevent ciphertext from being moved between records in the same store. Use an inline key path or pass an explicit key to `put` when per-record transposition protection is required. Older envelopes without `keyBound` remain readable through a legacy compatibility fallback.
 
 ```tsx
 import { createDatabase, createEncryptionMiddleware } from "use-idb";
