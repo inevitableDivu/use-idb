@@ -132,6 +132,7 @@ export class MemoryStorageAdapter implements IStoragePort {
     range?: IDBKeyRange | IDBValidKey,
     limit?: number,
   ): Promise<StorageEntry<T>[]> {
+    if (limit !== undefined && limit <= 0) return [];
     const store = this.ensureStore(storeName);
     const results: StorageEntry<T>[] = [];
 
@@ -242,6 +243,7 @@ export class MemoryStorageAdapter implements IStoragePort {
   }
 
   async cursorWithKeys<T>(ast: QueryAST<T>): Promise<StorageEntry<T>[]> {
+    if (ast.limitCount !== undefined && ast.limitCount <= 0) return [];
     const store = this.ensureStore(ast.storeName);
     let matched: StorageEntry<T>[] = [];
 
