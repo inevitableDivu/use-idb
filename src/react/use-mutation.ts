@@ -133,6 +133,11 @@ export function useMutation(customEngine?: Engine): UseMutationResult {
       setIsPending(true);
       setError(null);
       const chunkSize = options?.chunkSize ?? 500;
+      if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0) {
+        activeMutationsRef.current = Math.max(0, activeMutationsRef.current - 1);
+        setIsPending(activeMutationsRef.current > 0);
+        throw new RangeError("bulkPut chunkSize must be a positive safe integer");
+      }
       const results: (IDBValidKey | undefined)[] = [];
 
       try {
