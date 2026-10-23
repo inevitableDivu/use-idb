@@ -11,8 +11,8 @@
 
 - **Quick start:** install the package and build a typed, reactive list in a few minutes.
 - **Full guide:** schema design, CRUD, querying, hooks, configuration, migrations, encryption, and operational behavior are covered below.
-- **Runnable examples:** see the <a href="./examples/">examples directory</a> and <a href="./examples/README.md">examples guide</a>.
-- **Release notes:** see the <a href="./CHANGELOG.md">changelog</a>.
+- **Runnable examples:** see the <a href="https://github.com/inevitableDivu/use-idb/tree/main/examples">examples directory</a> and <a href="https://github.com/inevitableDivu/use-idb/blob/main/examples/README.md">examples guide</a>.
+- **Release notes:** see the <a href="https://github.com/inevitableDivu/use-idb/blob/main/CHANGELOG.md">changelog</a>.
 
 > **What this is:** a client-side storage and React reactivity layer built on IndexedDB. It is not a server database, a cloud-sync service, or a conflict-resolution system. Your application remains responsible for authentication, server synchronization, validation, and multi-writer conflict handling.
 
@@ -54,13 +54,13 @@ The package has root, <code>./react</code>, and <code>./core</code> exports. Rea
 
 Choose your package manager:
 
-~~~bash
+```bash
 npm install @inevitable_divu/use-idb
 # or
 pnpm add @inevitable_divu/use-idb
 # or
 yarn add @inevitable_divu/use-idb
-~~~
+```
 
 For React hooks, your application must also have React installed. This package ships TypeScript declarations.
 
@@ -72,7 +72,7 @@ This example creates a typed <code>todos</code> store and a React component that
 
 Create <code>src/db.ts</code>:
 
-~~~ts
+```ts
 import { createDatabase, createDatabaseHooks, store } from "@inevitable_divu/use-idb";
 
 export interface Todo {
@@ -98,7 +98,7 @@ export const db = createDatabase({
 
 export const { useLiveQuery, useMutation, useRecord, useIDBStatus } =
   createDatabaseHooks(db);
-~~~
+```
 
 The <code>name</code> identifies this database in the browser, and <code>version</code> controls schema upgrades. Store definitions are persistent schema: changing the primary key configuration of an existing store requires a migration (see [Schema migrations](#schema-migrations)).
 
@@ -106,7 +106,7 @@ The <code>name</code> identifies this database in the browser, and <code>version
 
 Create <code>src/TodoList.tsx</code>:
 
-~~~tsx
+```tsx
 import { useLiveQuery, useMutation } from "./db";
 
 export function TodoList() {
@@ -172,7 +172,7 @@ export function TodoList() {
     </section>
   );
 }
-~~~
+```
 
 That's the basic workflow: define a store, query it in a hook, and write through a mutation. The live query tracks its store dependencies and re-renders after local changes and supported cross-tab invalidations. Production applications should handle mutation failures with their own user-facing error state instead of only logging them.
 
@@ -180,7 +180,7 @@ That's the basic workflow: define a store, query it in a hook, and write through
 
 For a single preference or other small key-value use case, you can use <code>useIdb</code> without defining a schema or hook factory:
 
-~~~tsx
+```tsx
 import { useIdb } from "@inevitable_divu/use-idb";
 
 export function ThemeToggle() {
@@ -202,7 +202,7 @@ export function ThemeToggle() {
     </button>
   );
 }
-~~~
+```
 
 By default, <code>useIdb</code> uses the shared database named <code>__use_idb_default__</code> and the <code>keyval</code> object store. You can specify another <code>storeName</code>. Its result contains <code>value</code>, <code>setValue</code>, <code>remove</code>, <code>loading</code>, and <code>error</code>.
 
@@ -214,7 +214,7 @@ Use the schema-based API for applications with multiple entities, indexes, typed
 
 Use <code>store&lt;T&gt;()({...})</code> to declare a record shape and its key path. Index aliases can be simple field names or objects with index options.
 
-~~~ts
+```ts
 import { createDatabase, store } from "@inevitable_divu/use-idb";
 
 interface User {
@@ -240,7 +240,7 @@ export const db = createDatabase({
     }),
   },
 });
-~~~
+```
 
 - <code>keyPath</code> identifies the primary key on each record. For a compound key, use a tuple such as <code>["workspaceId", "userId"]</code>.
 - <code>indexes</code> defines the secondary indexes you can query. Use <code>unique: true</code> when duplicates should be rejected.
@@ -251,7 +251,7 @@ export const db = createDatabase({
 
 Use <code>outOfLineStore&lt;TItem, TKey&gt;()({...})</code> when the key is passed separately and is not stored on the record itself:
 
-~~~ts
+```ts
 import { createDatabase, outOfLineStore } from "@inevitable_divu/use-idb";
 
 interface AuditEvent {
@@ -271,13 +271,13 @@ const auditDb = createDatabase({
 
 await auditDb.put("events", { type: "created", occurredAt: new Date() }, "event-1");
 const event = await auditDb.get("events", "event-1");
-~~~
+```
 
 ## CRUD and transactions
 
 The database instance exposes typed storage operations. These examples assume <code>db</code> has a <code>users</code> store.
 
-~~~ts
+```ts
 // Insert or replace a record. Inline-key stores read the key from the record.
 await db.put("users", {
   id: "u-1",
@@ -296,7 +296,7 @@ await db.clear("users");
 
 // Read matching records through the query builder.
 const admins = await db.query("users").where("by_role").equals("admin").toArray();
-~~~
+```
 
 A write resolves after the owning storage transaction commits. If the transaction aborts, the write rejects and committed cache state is not published.
 
@@ -304,7 +304,7 @@ A write resolves after the owning storage transaction commits. If the transactio
 
 Use <code>db.transaction</code> when a set of changes must succeed or fail together:
 
-~~~ts
+```ts
 await db.transaction(["inventory", "orders"], "readwrite", async (tx) => {
   const item = await tx.get("inventory", "item-1");
   if (!item || item.remaining < 1) {
@@ -318,7 +318,7 @@ await db.transaction(["inventory", "orders"], "readwrite", async (tx) => {
     placedAt: new Date(),
   });
 });
-~~~
+```
 
 Keep transaction callbacks focused on database work. IndexedDB transactions can become inactive while waiting for network requests, timers, or unrelated asynchronous tasks. Do not use this as a place to await remote API calls.
 
@@ -332,7 +332,7 @@ For a database without middleware, <code>db.update(storeName, key, updater)</cod
 
 Queries use IndexedDB stores, indexes, and cursors where possible. The fluent builder is typed from the store definition.
 
-~~~ts
+```ts
 // Exact index match.
 const admins = await db.query("users").where("by_role").equals("admin").toArray();
 
@@ -358,7 +358,7 @@ const firstAdmin = await db.query("users").where("by_role").equals("admin").firs
 
 // Return only selected fields.
 const summaries = await db.query("users").select("id", "email").toArray();
-~~~
+```
 
 ### Query operators
 
@@ -379,7 +379,7 @@ Create hooks once at module scope with <code>createDatabaseHooks(db)</code>. The
 
 Subscribe to one record. It returns <code>data</code>, <code>isLoading</code>, <code>isFetching</code>, <code>error</code>, <code>set(value)</code>, <code>patch(partial)</code>, and <code>remove()</code>.
 
-~~~tsx
+```tsx
 function UserName({ id }: { id: string }) {
   const { data: user, isLoading, patch, error } = useRecord("users", id);
 
@@ -393,7 +393,7 @@ function UserName({ id }: { id: string }) {
     </button>
   );
 }
-~~~
+```
 
 <code>set</code> replaces the record; <code>patch</code> applies a shallow patch to an existing record; <code>remove</code> deletes it. The optional <code>optimistic</code> setting controls whether the cache is updated before the write commits. The hook does not create a missing record just because you call <code>patch</code>.
 
@@ -401,18 +401,18 @@ function UserName({ id }: { id: string }) {
 
 Subscribe to a query and re-render when tracked data changes. The result contains <code>data</code>, <code>isLoading</code>, <code>isFetching</code>, <code>error</code>, and <code>refetch()</code>.
 
-~~~tsx
+```tsx
 const result = useLiveQuery(
   (database) => database.query("users").where("by_role").equals(role).toArray(),
   [role],
 );
-~~~
+```
 
 Treat the callback as a **pure query description**. It may be invoked more than once as dependencies are inspected and data is fetched. Do not perform writes, analytics, or other side effects inside it.
 
 For custom asynchronous work, pass an explicit <code>stores</code> list so changes to those stores invalidate the query; use the optional abort signal to cancel superseded work:
 
-~~~tsx
+```tsx
 const { data, error } = useLiveQuery(
   async (_database, { signal }) => {
     const response = await fetch("/api/suggestions", { signal });
@@ -422,7 +422,7 @@ const { data, error } = useLiveQuery(
   [],
   { stores: ["users"], queryKey: "user-suggestions" },
 );
-~~~
+```
 
 Other options include <code>initialData</code>, <code>enabled</code>, <code>queryKey</code>, and <code>suspense</code>. Use <code>queryKey</code> to distinguish otherwise similar queries when captured state affects results.
 
@@ -446,7 +446,7 @@ Use status in your UI when persistence matters. A write to in-memory fallback st
 
 The recommended configuration separates the persistent schema from runtime behavior:
 
-~~~ts
+```ts
 import { createDatabase, store } from "@inevitable_divu/use-idb";
 
 interface Draft {
@@ -485,7 +485,7 @@ const db = createDatabase({
     },
   },
 });
-~~~
+```
 
 All groups are optional. Important settings:
 
@@ -508,7 +508,7 @@ Schema and migration failures are not silently converted into memory fallback. F
 
 Increase the database <code>version</code> when adding or changing stores and indexes. Migrations run during the synchronous IndexedDB version-change transaction.
 
-~~~ts
+```ts
 import { createDatabase, store } from "@inevitable_divu/use-idb";
 
 interface Profile {
@@ -544,7 +544,7 @@ const db = createDatabase({
     },
   },
 });
-~~~
+```
 
 Key rules:
 
@@ -557,7 +557,7 @@ Key rules:
 
 <code>createEncryptionMiddleware</code> can encrypt selected fields with AES-GCM through the browser's Web Crypto API. It supports key rings so older ciphertext can be read while new writes use a new primary key.
 
-~~~ts
+```ts
 import {
   createDatabase,
   createEncryptionMiddleware,
@@ -586,7 +586,7 @@ export function createPrivateNotesDatabase(encryptionKey: CryptoKey) {
     },
   );
 }
-~~~
+```
 
 **Security responsibilities remain with the application:**
 
@@ -596,7 +596,7 @@ export function createPrivateNotesDatabase(encryptionKey: CryptoKey) {
 - Ciphertext is bound to store, field, and primary key when the key is available. For auto-generated keys that are not known before encryption, that per-record binding cannot provide the same protection against ciphertext being moved between records.
 - Middleware uses asynchronous transformations, so explicit <code>db.transaction()</code> and <code>db.update()</code> are intentionally unavailable with middleware configured. Use the regular middleware-aware mutation methods.
 
-See [encrypted private notes](./examples/encrypted-private-notes.ts) for a fuller example.
+See [encrypted private notes](https://github.com/inevitableDivu/use-idb/blob/main/examples/encrypted-private-notes.ts) for a fuller example.
 
 ## Storage, lifecycle, and performance
 
@@ -657,9 +657,9 @@ Imports are available from <code>@inevitable_divu/use-idb</code>; React-only API
 
 ## Examples and release notes
 
-The [examples directory](./examples/) covers typed CRUD, live React lists, multi-entry indexes, offline outboxes, compound keys, schema migration, atomic multi-store updates, field encryption, cross-tab invalidation, and bulk import/export. Start with the [examples guide](./examples/README.md).
+The [examples directory](https://github.com/inevitableDivu/use-idb/tree/main/examples) covers typed CRUD, live React lists, multi-entry indexes, offline outboxes, compound keys, schema migration, atomic multi-store updates, field encryption, cross-tab invalidation, and bulk import/export. Start with the [examples guide](https://github.com/inevitableDivu/use-idb/blob/main/examples/README.md).
 
-For release-specific changes and migration notes, see the [changelog](./CHANGELOG.md). Bugs and feature requests belong in [GitHub Issues](https://github.com/inevitableDivu/use-idb/issues).
+For release-specific changes and migration notes, see the [changelog](https://github.com/inevitableDivu/use-idb/blob/main/CHANGELOG.md). Bugs and feature requests belong in [GitHub Issues](https://github.com/inevitableDivu/use-idb/issues).
 
 ## License
 
