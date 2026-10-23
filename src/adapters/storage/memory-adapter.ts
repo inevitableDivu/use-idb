@@ -1,6 +1,6 @@
 import type { ConnectionState, StorageQuota } from "../../types/status";
 import type { QueryAST } from "../../types/query";
-import type { IStoragePort, IStorageTransaction, StorageBatchOp } from "../../ports/storage.port";
+import type { IStoragePort, IStorageTransaction, StorageBatchOp, StorageEntry } from "../../ports/storage.port";
 import { toKeyString, isValidKey } from "../../core/key-serializer";
 
 interface MemoryRecord {
@@ -126,6 +126,29 @@ export class MemoryStorageAdapter implements IStoragePort {
     return results;
   }
 
+  async getAllWithKeys<T>(
+    storeName: string,
+    indexName?: string,
+    range?: IDBKeyRange | IDBValidKey,
+    limit?: number,
+  ): Promise<StorageEntry<T>[]> {
+    const store = this.ensureStore(storeName);
+    const results: StorageEntry<T>[] = [];
+
+    for (const rec of store.values()) {
+      const compareTarget = indexName
+        ? this.extractIndexValue(rec.value, indexName)
+        : rec.key;
+
+      if (this.matchesRange(compareTarget, range)) {
+        results.push({ key: rec.key, value: rec.value as T });
+        if (limit !== undefined && results.length >= limit) break;
+      }
+    }
+
+    return results;
+  }
+
   async put(storeName: string, value: unknown, key?: IDBValidKey): Promise<IDBValidKey> {
     const store = this.ensureStore(storeName);
     let resolvedKey = key;
@@ -215,15 +238,16 @@ export class MemoryStorageAdapter implements IStoragePort {
   }
 
   async cursor<T>(ast: QueryAST<T>): Promise<T[]> {
+    return (await this.cursorWithKeys(ast)).map((entry) => entry.value);
+  }
+
+  async cursorWithKeys<T>(ast: QueryAST<T>): Promise<StorageEntry<T>[]> {
     const store = this.ensureStore(ast.storeName);
-    let matched: Array<{ key: IDBValidKey; value: T }> = [];
+    let matched: StorageEntry<T>[] = [];
 
     for (const rec of store.values()) {
       const compareTarget = ast.indexName
-        ? this.extractIndexValue(
-            rec.value,
-            ast.fieldPath ?? ast.indexName,
-          )
+        ? this.extractIndexValue(rec.value, ast.fieldPath ?? ast.indexName)
         : rec.key;
 
       if (ast.indexMultiEntry && Array.isArray(compareTarget)) {
@@ -237,29 +261,21 @@ export class MemoryStorageAdapter implements IStoragePort {
       }
     }
 
-    // Apply direction
     if (ast.direction === "prev" || ast.direction === "prevunique") {
       matched.reverse();
     }
 
-    let records = matched.map((m) => m.value);
-
-    // Apply in-memory JavaScript filter predicate
     if (ast.filterPredicate) {
-      records = records.filter(ast.filterPredicate);
+      matched = matched.filter((entry) => ast.filterPredicate!(entry.value));
     }
-
-    // Apply offset
     if (ast.offsetCount > 0) {
-      records = records.slice(ast.offsetCount);
+      matched = matched.slice(ast.offsetCount);
     }
-
-    // Apply limit
     if (ast.limitCount !== undefined) {
-      records = records.slice(0, ast.limitCount);
+      matched = matched.slice(0, ast.limitCount);
     }
 
-    return records;
+    return matched;
   }
 
   async getQuota(): Promise<StorageQuota> {
