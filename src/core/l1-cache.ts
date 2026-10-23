@@ -48,6 +48,8 @@ export interface CacheEntry<T = unknown> {
   retryCount?: number;
   error: Error | null;
   generationAtStart: number;
+  /** Monotonic token used to discard out-of-order fetch results. */
+  requestId: number;
   promise?: Promise<T>;
   snapshot: QuerySnapshot<T>;
   subscribers: Set<() => void>;
@@ -160,6 +162,7 @@ export class L1Cache {
         retryCount: 0,
         error: null,
         generationAtStart: 0,
+        requestId: 0,
         snapshot: Object.freeze({
           data: undefined,
           isLoading: false,
@@ -186,10 +189,12 @@ export class L1Cache {
     return entry;
   }
 
-  markPending<T>(entry: CacheEntry<T>, storeNames: string[]): void {
+  markPending<T>(entry: CacheEntry<T>, storeNames: string[]): number {
+    entry.requestId += 1;
     entry.status = "pending";
     entry.generationAtStart = Math.max(...storeNames.map((s) => this.getGeneration(s)));
     this.updateEntrySnapshot(entry);
+    return entry.requestId;
   }
 
   startPending<T>(entry: CacheEntry<T>, storeNames: string[]): void {
@@ -202,7 +207,8 @@ export class L1Cache {
    *
    * Automatically triggers a background re-fetch if a stale read is rejected.
    */
-  resolve<T>(entry: CacheEntry<T>, data: T): boolean {
+  resolve<T>(entry: CacheEntry<T>, data: T, requestId?: number): boolean {
+    if (requestId !== undefined && requestId !== entry.requestId) return false;
     const currentMaxGen = Math.max(
       ...Array.from(entry.storeNames).map((s) => this.getGeneration(s)),
     );
@@ -232,7 +238,8 @@ export class L1Cache {
     return true;
   }
 
-  reject<T>(entry: CacheEntry<T>, error: Error): void {
+  reject<T>(entry: CacheEntry<T>, error: Error, requestId?: number): void {
+    if (requestId !== undefined && requestId !== entry.requestId) return;
     entry.status = "error";
     entry.error = error;
     this.updateEntrySnapshot(entry);

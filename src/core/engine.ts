@@ -1,4 +1,4 @@
-import type { DatabaseSchema, StoreKey, StoreNames, StoreValue } from "../types/schema";
+import type { DatabaseSchema, StoreConfig, StoreKey, StoreNames, StoreValue } from "../types/schema";
 import type { IDBStatusSnapshot, StorageQuota } from "../types/status";
 import type { IStoragePort, IStorageTransaction, StorageBatchOp } from "../ports/storage.port";
 import type { ISyncPort } from "../ports/sync.port";
@@ -43,6 +43,104 @@ export interface EngineConfig {
 }
 
 const databaseRegistry = new Map<string, Engine<any>>();
+
+type DatabaseRegistration = {
+  schemaSignature: string;
+  storage?: IStoragePort;
+  sync?: ISyncPort;
+  lock?: ILockPort;
+  middlewares: readonly IDBMiddleware[];
+};
+
+const databaseRegistrations = new WeakMap<Engine<any>, DatabaseRegistration>();
+const referenceIds = new WeakMap<object, number>();
+let nextReferenceId = 1;
+
+function referenceId(value: object): number {
+  let id = referenceIds.get(value);
+  if (id === undefined) {
+    id = nextReferenceId++;
+    referenceIds.set(value, id);
+  }
+  return id;
+}
+
+function schemaSignature(schema: DatabaseSchema<any>): string {
+  const migrations = Object.entries(schema.migrations ?? {})
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([version, migration]) => [version, referenceId(migration)]);
+  const stores = Object.fromEntries(
+    Object.entries(schema.stores as Record<string, StoreConfig<any, any>>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, store]) => [
+        name,
+        {
+          keyPath: store.keyPath ?? null,
+          autoIncrement: store.autoIncrement ?? false,
+          indexes: Object.fromEntries(
+            Object.entries(store.indexes ?? {} as Record<string, import("../types/schema").IndexConfig<any>>)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([indexName, index]) => [
+                indexName,
+                {
+                  keyPath: index.keyPath,
+                  unique: index.unique ?? false,
+                  multiEntry: index.multiEntry ?? false,
+                },
+              ]),
+          ),
+        },
+      ]),
+  );
+  return JSON.stringify({
+    name: schema.name,
+    version: schema.version,
+    stores,
+    migrations,
+    options: schema.options ?? {},
+  });
+}
+
+function sameMiddlewareList(
+  left: readonly IDBMiddleware[],
+  right: readonly IDBMiddleware[],
+): boolean {
+  return left.length === right.length && left.every((middleware, index) => middleware === right[index]);
+}
+
+/**
+ * Throws rather than silently returning an engine with a different schema or security
+ * configuration. Middleware instances are compared by identity and order because their
+ * closures may hold encryption keys or other private runtime state.
+ */
+export class DatabaseConfigurationConflictError extends Error {
+  constructor(databaseName: string, conflicts: string[]) {
+    super(
+      `Database "${databaseName}" is already registered with a different configuration (${conflicts.join(", ")}). Reuse the original Engine or destroy it before registering a different configuration.`,
+    );
+    this.name = "DatabaseConfigurationConflictError";
+  }
+}
+
+function assertCompatibleRegistration(
+  existing: Engine<any>,
+  schema: DatabaseSchema<any>,
+  config?: EngineConfig,
+): void {
+  const registered = databaseRegistrations.get(existing);
+  if (!registered) return;
+  const conflicts: string[] = [];
+  if (registered.schemaSignature !== schemaSignature(schema)) conflicts.push("schema");
+  if (registered.storage !== config?.storage) conflicts.push("storage adapter");
+  if (registered.sync !== config?.sync) conflicts.push("sync adapter");
+  if (registered.lock !== config?.lock) conflicts.push("lock adapter");
+  if (!sameMiddlewareList(registered.middlewares, config?.middlewares ?? [])) {
+    conflicts.push("middleware");
+  }
+  if (conflicts.length > 0) {
+    throw new DatabaseConfigurationConflictError(schema.name, conflicts);
+  }
+}
 
 /**
  * Retrieves an active Engine instance from the registry if one exists with the given name.
@@ -201,7 +299,9 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
     this.syncPort.close();
     await this.storage.close();
     this.statusListeners.clear();
-    databaseRegistry.delete(this.schema.name);
+    if (databaseRegistry.get(this.schema.name) === this) {
+      databaseRegistry.delete(this.schema.name);
+    }
   }
 
   // ── Core CRUD Delegations ──
@@ -410,10 +510,18 @@ export function createDatabase<TSchema extends DatabaseSchema<any> = DatabaseSch
 ): Engine<TSchema> {
   const existing = databaseRegistry.get(schema.name);
   if (existing) {
+    assertCompatibleRegistration(existing, schema, config);
     return existing as Engine<TSchema>;
   }
 
   const engine = new Engine(schema, config);
+  databaseRegistrations.set(engine, {
+    schemaSignature: schemaSignature(schema),
+    storage: config?.storage,
+    sync: config?.sync,
+    lock: config?.lock,
+    middlewares: [...(config?.middlewares ?? [])],
+  });
   databaseRegistry.set(schema.name, engine);
   return engine;
 }

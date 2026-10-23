@@ -1,6 +1,9 @@
 import { useSyncExternalStore, useCallback, useMemo, useEffect } from "react";
 import { useDatabase } from "./context";
 import { toKeyString } from "../core/key-serializer";
+import type { Engine } from "../core/engine";
+
+const updateQueues = new WeakMap<Engine, Map<string, Promise<unknown>>>();
 import type { QuerySnapshot } from "../core/l1-cache";
 
 /**
@@ -124,14 +127,18 @@ export function useIdb<T>(key: string, options?: UseIdbOptions<T>): UseIdbReturn
 
   const fetchRecord = useCallback(() => {
     if (entry.status === "idle") {
-      engine.l1Cache.markPending(entry, [storeName]);
+      const requestId = engine.l1Cache.markPending(entry, [storeName]);
       engine
         .get(storeName, key)
         .then((val) => {
-          engine.l1Cache.resolve(entry, val as T | undefined);
+          engine.l1Cache.resolve(entry, val as T | undefined, requestId);
         })
         .catch((err) => {
-          engine.l1Cache.reject(entry, err instanceof Error ? err : new Error(String(err)));
+          engine.l1Cache.reject(
+            entry,
+            err instanceof Error ? err : new Error(String(err)),
+            requestId,
+          );
         });
     }
   }, [engine, entry, storeName, key]);
@@ -157,26 +164,51 @@ export function useIdb<T>(key: string, options?: UseIdbOptions<T>): UseIdbReturn
     return entry.snapshot as QuerySnapshot<T>;
   }, [entry]);
 
-  const getServerSnapshot = useCallback((): QuerySnapshot<T> => {
-    return Object.freeze({
-      data: options?.defaultValue,
-      isLoading: false,
-      isFetching: false,
-      error: null,
-    });
-  }, [options?.defaultValue]);
+  const serverSnapshot = useMemo(
+    (): QuerySnapshot<T> =>
+      Object.freeze({
+        data: options?.defaultValue,
+        isLoading: false,
+        isFetching: false,
+        error: null,
+      }),
+    [options?.defaultValue],
+  );
+  const getServerSnapshot = useCallback((): QuerySnapshot<T> => serverSnapshot, [serverSnapshot]);
 
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const setValue = useCallback(
     async (updater: T | ((prev: T | undefined) => T)) => {
-      const currentVal = snapshot.data !== undefined ? snapshot.data : options?.defaultValue;
-      const nextVal = isFunctionUpdater(updater) ? updater(currentVal) : updater;
-      await engine.put(storeName, nextVal, key, {
-        optimistic: options?.optimistic ?? true,
-      });
+      const performUpdate = async () => {
+        const currentVal = isFunctionUpdater(updater)
+          ? ((await engine.get(storeName, key)) as T | undefined) ?? options?.defaultValue
+          : undefined;
+        const nextVal = isFunctionUpdater(updater) ? updater(currentVal) : updater;
+        await engine.put(storeName, nextVal, key, {
+          optimistic: options?.optimistic ?? true,
+        });
+      };
+      if (!isFunctionUpdater(updater)) {
+        await performUpdate();
+        return;
+      }
+      let queues = updateQueues.get(engine);
+      if (!queues) {
+        queues = new Map();
+        updateQueues.set(engine, queues);
+      }
+      const queueKey = `${storeName}:${toKeyString(key)}`;
+      const previous = queues.get(queueKey) ?? Promise.resolve();
+      const operation = previous.catch(() => {}).then(performUpdate);
+      queues.set(queueKey, operation);
+      try {
+        await operation;
+      } finally {
+        if (queues.get(queueKey) === operation) queues.delete(queueKey);
+      }
     },
-    [engine, storeName, key, snapshot.data, options?.defaultValue, options?.optimistic],
+    [engine, storeName, key, options?.defaultValue, options?.optimistic],
   );
 
   const remove = useCallback(async () => {

@@ -97,6 +97,30 @@ describe("React Hooks", () => {
       });
     });
 
+    it("preserves concurrent patches to different fields", async () => {
+      const db = createDatabase({
+        name: "test-concurrent-patch-db",
+        version: 1,
+        stores: {
+          profiles: store<{ id: string; name: string; score: number }>()({ keyPath: "id" }),
+        },
+      });
+      await db.put("profiles", { id: "p2", name: "Initial", score: 0 });
+      const { result } = renderHook(() =>
+        useRecord<{ id: string; name: string; score: number }>("profiles", "p2", undefined, db),
+      );
+
+      await act(async () => {
+        await Promise.all([
+          result.current.patch({ name: "Updated" }),
+          result.current.patch({ score: 99 }),
+        ]);
+      });
+
+      const saved = await db.get("profiles", "p2");
+      expect(saved).toEqual({ id: "p2", name: "Updated", score: 99 });
+    });
+
     it("maintains referentially identical snapshot across re-renders when key is undefined", () => {
       const db = createDatabase({
         name: "test-snapshot-stability-db",

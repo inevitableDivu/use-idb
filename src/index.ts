@@ -13,7 +13,13 @@ export type { UseMutationResult } from "./react/use-mutation";
 export { useIDBStatus } from "./react/use-idb-status";
 
 // ── Core Engine & Factories ──
-export { Engine, createDatabase, getDatabase, getDefaultEngine } from "./core/engine";
+export {
+  Engine,
+  createDatabase,
+  getDatabase,
+  getDefaultEngine,
+  DatabaseConfigurationConflictError,
+} from "./core/engine";
 export type { EngineConfig, DatabaseInstance } from "./core/engine";
 export { QueryBuilder } from "./core/query-engine";
 export { L1Cache, DELETED_SENTINEL } from "./core/l1-cache";
@@ -21,7 +27,7 @@ export type { QuerySnapshot, CacheEntry, L1CacheOptions } from "./core/l1-cache"
 export { DependencyTracker } from "./core/dependency-tracker";
 export { WriteCoalescer } from "./core/write-coalescer";
 export type { WriteCoalescerOptions } from "./core/write-coalescer";
-export { serializeKey, isValidKey, hashQuery } from "./core/key-serializer";
+export { serializeKey, isValidKey, toKeyString, hashQuery } from "./core/key-serializer";
 
 // ── Ports ──
 export type { IStoragePort, IStorageTransaction, StorageBatchOp, StorageEntry } from "./ports/storage.port";
