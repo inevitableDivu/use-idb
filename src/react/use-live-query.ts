@@ -146,7 +146,7 @@ export function useLiveQuery<T>(
 
   const executeFetch = useCallback((): Promise<T> => {
     if (!enabled) return Promise.resolve(undefined as unknown as T);
-    engine.l1Cache.markPending(entry, storeNames);
+    const requestId = engine.l1Cache.markPending(entry, storeNames);
 
     const promise = (async () => {
       try {
@@ -163,11 +163,11 @@ export function useLiveQuery<T>(
           data = await result;
         }
 
-        engine.l1Cache.resolve(entry, data);
+        engine.l1Cache.resolve(entry, data, requestId);
         return data;
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
-        engine.l1Cache.reject(entry, error);
+        engine.l1Cache.reject(entry, error, requestId);
         throw error;
       }
     })();
