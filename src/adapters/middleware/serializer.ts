@@ -75,14 +75,20 @@ function encodeValue(value: unknown, ancestors: WeakSet<object>): unknown {
       );
     }
     if (value instanceof Set) {
-      return tagged("set", Array.from(value, (item) => encodeValue(item, ancestors)));
+      return tagged(
+        "set",
+        Array.from(value, (item) => encodeValue(item, ancestors)),
+      );
     }
 
     // Wrap every ordinary object as entries. User data can therefore contain fields that
     // resemble serializer metadata without being misinterpreted during decode.
     return tagged(
       "object",
-      Object.keys(value).map((key) => [key, encodeValue((value as Record<string, unknown>)[key], ancestors)]),
+      Object.keys(value).map((key) => [
+        key,
+        encodeValue((value as Record<string, unknown>)[key], ancestors),
+      ]),
     );
   } finally {
     ancestors.delete(value);
@@ -98,7 +104,10 @@ function decodeTypedArray(payload: unknown): unknown {
     throw new TypeError("Malformed typed-array serialization payload.");
   }
   const bytes = fromBase64(descriptor.bytes);
-  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const copy = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
 
   switch (descriptor.constructor) {
     case "DataView":
@@ -153,7 +162,8 @@ function decodeValue(value: unknown): unknown {
     case "undefined":
       return undefined;
     case "bigint":
-      if (typeof record.payload !== "string") throw new TypeError("Malformed bigint serializer payload.");
+      if (typeof record.payload !== "string")
+        throw new TypeError("Malformed bigint serializer payload.");
       return BigInt(record.payload);
     case "number":
       if (record.payload === "NaN") return Number.NaN;
@@ -162,10 +172,12 @@ function decodeValue(value: unknown): unknown {
       if (record.payload === "-0") return -0;
       throw new TypeError("Malformed number serializer payload.");
     case "date":
-      if (typeof record.payload !== "number") throw new TypeError("Malformed date serializer payload.");
+      if (typeof record.payload !== "number")
+        throw new TypeError("Malformed date serializer payload.");
       return new Date(record.payload);
     case "array-buffer": {
-      if (typeof record.payload !== "string") throw new TypeError("Malformed ArrayBuffer serializer payload.");
+      if (typeof record.payload !== "string")
+        throw new TypeError("Malformed ArrayBuffer serializer payload.");
       const bytes = fromBase64(record.payload);
       return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     }
@@ -185,7 +197,8 @@ function decodeValue(value: unknown): unknown {
       if (!Array.isArray(record.payload)) throw new TypeError("Malformed Set serializer payload.");
       return new Set(record.payload.map(decodeValue));
     case "object": {
-      if (!Array.isArray(record.payload)) throw new TypeError("Malformed object serializer payload.");
+      if (!Array.isArray(record.payload))
+        throw new TypeError("Malformed object serializer payload.");
       const result: Record<string, unknown> = {};
       for (const entry of record.payload) {
         if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") {

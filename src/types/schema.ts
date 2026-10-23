@@ -77,6 +77,8 @@ export type IndexObjectConfig<TItem, TPath extends KeyPath<TItem> = KeyPath<TIte
 
 export type IndexInput<TItem> = KeyPath<TItem> | IndexObjectConfig<TItem>;
 export type IndexesInputMap<TItem> = Record<string, IndexInput<TItem>>;
+declare const emptyIndexesBrand: unique symbol;
+type EmptyIndexes<TItem> = { readonly [emptyIndexesBrand]?: TItem };
 
 export type InferIndexValue<TItem, TIndex extends IndexInput<TItem>> =
   TIndex extends KeyPath<TItem>
@@ -92,21 +94,20 @@ export type InferIndexValue<TItem, TIndex extends IndexInput<TItem>> =
 export interface StoreInput<
   TItem extends object,
   TPath extends KeyPath<TItem> = KeyPath<TItem>,
-  TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+  TIndexes extends IndexesInputMap<TItem> = EmptyIndexes<TItem>,
 > {
   readonly keyPath: TPath;
   readonly autoIncrement?: boolean;
   readonly indexes?: TIndexes;
 }
 
-export type DefaultKeyPath<TItem extends object> = "id" extends StringKeyOf<TItem>
-  ? "id"
-  : KeyPath<TItem>;
+export type DefaultKeyPath<TItem extends object> =
+  "id" extends StringKeyOf<TItem> ? "id" : KeyPath<TItem>;
 
 export interface StoreDefinition<
   TItem extends object = object,
   TPath extends KeyPath<TItem> = KeyPath<TItem>,
-  TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+  TIndexes extends IndexesInputMap<TItem> = EmptyIndexes<TItem>,
 > extends StoreConfig<TItem, InferKeyFromPath<TItem, TPath> & IDBValidKey> {
   readonly keyPath: TPath;
   readonly indexes: Record<string, IndexConfig<TItem>>;
@@ -124,7 +125,7 @@ export interface StoreDefinition<
  */
 export interface OutOfLineStoreInput<
   TItem extends object,
-  TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+  TIndexes extends IndexesInputMap<TItem> = EmptyIndexes<TItem>,
 > {
   readonly autoIncrement?: boolean;
   readonly indexes?: TIndexes;
@@ -137,7 +138,7 @@ export interface OutOfLineStoreInput<
 export interface OutOfLineStoreDefinition<
   TItem extends object = object,
   TKey extends IDBValidKey = IDBValidKey,
-  TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+  TIndexes extends IndexesInputMap<TItem> = EmptyIndexes<TItem>,
 > extends StoreConfig<TItem, TKey> {
   readonly indexes: Record<string, IndexConfig<TItem>>;
   readonly $types: {
@@ -213,7 +214,7 @@ function normalizeStore(config: unknown): RuntimeStoreConfig {
 
 export function store<TItem extends object>(): <
   const TPath extends KeyPath<TItem>,
-  const TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+  const TIndexes extends IndexesInputMap<TItem> = EmptyIndexes<TItem>,
 >(
   config: StoreInput<TItem, TPath, TIndexes>,
 ) => StoreDefinition<TItem, TPath, TIndexes>;
@@ -233,7 +234,9 @@ function normalizeOutOfLineStore(config: unknown): unknown {
     throw new TypeError("An out-of-line store configuration must be an object.");
   }
   if (input.keyPath !== undefined) {
-    throw new TypeError("Out-of-line stores cannot declare keyPath; use store<T>() for inline keys.");
+    throw new TypeError(
+      "Out-of-line stores cannot declare keyPath; use store<T>() for inline keys.",
+    );
   }
   if (input.autoIncrement !== undefined && typeof input.autoIncrement !== "boolean") {
     throw new TypeError("Store autoIncrement must be a boolean.");
@@ -279,21 +282,16 @@ function normalizeOutOfLineStore(config: unknown): unknown {
  * const events = outOfLineStore<Event, string>()({ indexes: { by_kind: "kind" } });
  * ```
  */
-export function outOfLineStore<
-  TItem extends object,
-  TKey extends IDBValidKey = IDBValidKey,
->(): <
-  const TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+export function outOfLineStore<TItem extends object, TKey extends IDBValidKey = IDBValidKey>(): <
+  const TIndexes extends IndexesInputMap<TItem> = EmptyIndexes<TItem>,
 >(
   config?: OutOfLineStoreInput<TItem, TIndexes>,
 ) => OutOfLineStoreDefinition<TItem, TKey, TIndexes>;
 export function outOfLineStore<
   TItem extends object,
   TKey extends IDBValidKey = IDBValidKey,
-  const TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
->(
-  config?: OutOfLineStoreInput<TItem, TIndexes>,
-): OutOfLineStoreDefinition<TItem, TKey, TIndexes>;
+  const TIndexes extends IndexesInputMap<TItem> = EmptyIndexes<TItem>,
+>(config?: OutOfLineStoreInput<TItem, TIndexes>): OutOfLineStoreDefinition<TItem, TKey, TIndexes>;
 export function outOfLineStore(config?: unknown): unknown {
   if (config === undefined) {
     return (deferred: unknown) => normalizeOutOfLineStore(deferred);
@@ -409,7 +407,6 @@ export interface DatabaseSchema<
   options?: DatabaseOptions;
 }
 
-
 /**
  * Validate database configuration before touching browser storage. This keeps configuration
  * mistakes deterministic and prevents them from being mistaken for IndexedDB availability errors.
@@ -426,7 +423,9 @@ export function validateDatabaseSchema(schema: DatabaseSchema): void {
 
   for (const [storeName, config] of Object.entries(schema.stores)) {
     if (!storeName || !isRecord(config)) {
-      throw new TypeError("Each object store must have a non-empty name and an object configuration.");
+      throw new TypeError(
+        "Each object store must have a non-empty name and an object configuration.",
+      );
     }
     if (config.keyPath !== undefined && !isRuntimeKeyPath(config.keyPath)) {
       throw new TypeError(`Store "${storeName}" has an invalid keyPath.`);
@@ -435,7 +434,9 @@ export function validateDatabaseSchema(schema: DatabaseSchema): void {
       throw new TypeError(`Store "${storeName}" autoIncrement must be a boolean.`);
     }
     if (config.autoIncrement === true && (Array.isArray(config.keyPath) || config.keyPath === "")) {
-      throw new TypeError(`Store "${storeName}" cannot use autoIncrement with an empty or compound keyPath.`);
+      throw new TypeError(
+        `Store "${storeName}" cannot use autoIncrement with an empty or compound keyPath.`,
+      );
     }
     if (config.indexes !== undefined && !isRecord(config.indexes)) {
       throw new TypeError(`Store "${storeName}" indexes must be an object map.`);
@@ -451,7 +452,9 @@ export function validateDatabaseSchema(schema: DatabaseSchema): void {
         throw new TypeError(`Index "${storeName}.${indexName}" options must be booleans.`);
       }
       if (index.multiEntry === true && Array.isArray(index.keyPath)) {
-        throw new TypeError(`Index "${storeName}.${indexName}" cannot combine multiEntry with a compound keyPath.`);
+        throw new TypeError(
+          `Index "${storeName}.${indexName}" cannot combine multiEntry with a compound keyPath.`,
+        );
       }
     }
   }
@@ -462,10 +465,17 @@ export function validateDatabaseSchema(schema: DatabaseSchema): void {
     }
     for (const [version, migrate] of Object.entries(schema.migrations)) {
       const targetVersion = Number(version);
-      if (!Number.isSafeInteger(targetVersion) || targetVersion < 1 || targetVersion > schema.version) {
-        throw new RangeError(`Migration version "${version}" must be between 1 and the database version.`);
+      if (
+        !Number.isSafeInteger(targetVersion) ||
+        targetVersion < 1 ||
+        targetVersion > schema.version
+      ) {
+        throw new RangeError(
+          `Migration version "${version}" must be between 1 and the database version.`,
+        );
       }
-      if (typeof migrate !== "function") throw new TypeError(`Migration v${version} must be a function.`);
+      if (typeof migrate !== "function")
+        throw new TypeError(`Migration v${version} must be a function.`);
     }
   }
 
@@ -489,7 +499,11 @@ export function validateDatabaseSchema(schema: DatabaseSchema): void {
   ) {
     throw new RangeError("cacheTTLMs must be a non-negative safe integer.");
   }
-  for (const option of ["enableCrossTabSync", "fallbackToMemory", "requestPersistentStorage"] as const) {
+  for (const option of [
+    "enableCrossTabSync",
+    "fallbackToMemory",
+    "requestPersistentStorage",
+  ] as const) {
     if (options[option] !== undefined && typeof options[option] !== "boolean") {
       throw new TypeError(`${option} must be a boolean.`);
     }
@@ -502,41 +516,49 @@ export type DatabaseConfig<TStores extends StoreMap> = DatabaseSchema<TStores>;
 // Type Inference Helpers
 export type StoreNames<S extends DatabaseSchema<any>> = keyof S["stores"] & string;
 
-export type StoreValue<S extends DatabaseSchema<any>, K extends StoreNames<S>> =
-  S["stores"][K] extends { readonly $types: { readonly item: infer R extends object } }
+export type StoreValue<
+  S extends DatabaseSchema<any>,
+  K extends StoreNames<S>,
+> = S["stores"][K] extends { readonly $types: { readonly item: infer R extends object } }
+  ? R
+  : S["stores"][K] extends { readonly __recordType?: infer R extends object }
     ? R
-    : S["stores"][K] extends { readonly __recordType?: infer R extends object }
-      ? R
-      : unknown;
+    : unknown;
 
-export type StoreKey<S extends DatabaseSchema<any>, K extends StoreNames<S>> =
-  S["stores"][K] extends { readonly $types: { readonly key: infer Key } }
-    ? Key extends IDBValidKey
-      ? Key
-      : IDBValidKey
-    : S["stores"][K] extends { readonly __keyType?: infer Key extends IDBValidKey }
-      ? Key
-      : IDBValidKey;
+export type StoreKey<
+  S extends DatabaseSchema<any>,
+  K extends StoreNames<S>,
+> = S["stores"][K] extends { readonly $types: { readonly key: infer Key } }
+  ? Key extends IDBValidKey
+    ? Key
+    : IDBValidKey
+  : S["stores"][K] extends { readonly __keyType?: infer Key extends IDBValidKey }
+    ? Key
+    : IDBValidKey;
 
-export type StoreIndexes<S extends DatabaseSchema<any>, K extends StoreNames<S>> =
-  S["stores"][K] extends { readonly $types: { readonly indexes: infer Indexes } }
-    ? keyof Indexes & string
-    : S["stores"][K]["indexes"] extends Record<string, any>
+export type StoreIndexes<
+  S extends DatabaseSchema<any>,
+  K extends StoreNames<S>,
+> = S["stores"][K] extends { readonly $types: { readonly indexes: infer Indexes } }
+  ? keyof Indexes & string
+  : S["stores"][K]["indexes"] extends Record<string, any>
     ? keyof S["stores"][K]["indexes"] & string
     : string;
 
-export type InferStoreItem<TStores extends StoreMap, K extends keyof TStores> =
-  TStores[K] extends { readonly $types: { readonly item: infer TItem extends object } }
+export type InferStoreItem<TStores extends StoreMap, K extends keyof TStores> = TStores[K] extends {
+  readonly $types: { readonly item: infer TItem extends object };
+}
+  ? TItem
+  : TStores[K] extends { readonly __recordType?: infer TItem extends object }
     ? TItem
-    : TStores[K] extends { readonly __recordType?: infer TItem extends object }
-      ? TItem
-      : unknown;
+    : unknown;
 
-export type InferStoreKey<TStores extends StoreMap, K extends keyof TStores> =
-  TStores[K] extends { readonly $types: { readonly key: infer TKey } }
-    ? TKey extends IDBValidKey
-      ? TKey
-      : IDBValidKey
-    : TStores[K] extends { readonly __keyType?: infer TKey extends IDBValidKey }
-      ? TKey
-      : IDBValidKey;
+export type InferStoreKey<TStores extends StoreMap, K extends keyof TStores> = TStores[K] extends {
+  readonly $types: { readonly key: infer TKey };
+}
+  ? TKey extends IDBValidKey
+    ? TKey
+    : IDBValidKey
+  : TStores[K] extends { readonly __keyType?: infer TKey extends IDBValidKey }
+    ? TKey
+    : IDBValidKey;

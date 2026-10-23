@@ -66,11 +66,12 @@ export function runMigrations(
       const actualKeyPath = Array.isArray(store.keyPath)
         ? Array.from(store.keyPath)
         : store.keyPath;
-      const configuredKeyPath = config.keyPath === undefined
-        ? null
-        : Array.isArray(config.keyPath)
-          ? Array.from(config.keyPath)
-          : config.keyPath;
+      const configuredKeyPath =
+        config.keyPath === undefined
+          ? null
+          : Array.isArray(config.keyPath)
+            ? Array.from(config.keyPath)
+            : config.keyPath;
       const expectedAutoIncrement = config.autoIncrement === true;
       if (
         JSON.stringify(actualKeyPath) !== JSON.stringify(configuredKeyPath) ||

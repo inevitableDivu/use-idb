@@ -70,9 +70,6 @@ export function compileQueryPlan<T>(source: QueryAST<T>): QueryPlan<T> {
     ast,
     summary,
     canUseNativeCount:
-      Boolean(ast.isCount) &&
-      !requiresPostFilter &&
-      !requiresPostSort &&
-      !ast.selectedFields,
+      Boolean(ast.isCount) && !requiresPostFilter && !requiresPostSort && !ast.selectedFields,
   });
 }

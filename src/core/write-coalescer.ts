@@ -236,7 +236,9 @@ export class WriteCoalescer {
       if (existing) {
         if (existing.type === "put") {
           // Coalesce put + delete -> delete
-          const cancelled = new Error(`Operation cancelled: record ${opKey} was deleted before flush`);
+          const cancelled = new Error(
+            `Operation cancelled: record ${opKey} was deleted before flush`,
+          );
           for (const rej of existing.rejecters) rej(cancelled);
           for (const rej of existing.coalescedDeleteRejecters ?? []) rej(cancelled);
           const entry = this.l1Cache.getEntry(`record:${storeName}:${opKey}`);
@@ -279,7 +281,8 @@ export class WriteCoalescer {
     const cancelled = new Error(`Operation cancelled: store ${storeName} was cleared before flush`);
     for (const op of batch.operations.values()) {
       for (const rej of op.rejecters) rej(cancelled);
-      for (const rej of op.type === "put" ? op.coalescedDeleteRejecters ?? [] : []) rej(cancelled);
+      for (const rej of op.type === "put" ? (op.coalescedDeleteRejecters ?? []) : [])
+        rej(cancelled);
       if (op.key !== undefined) {
         const entry = this.l1Cache.getEntry(`record:${storeName}:${toKeyString(op.key)}`);
         if (entry) this.l1Cache.rollbackMutations(entry, op.mutationIds);
@@ -539,7 +542,9 @@ export class WriteCoalescer {
         affectedKeys,
       };
       if (this.dependencyTracker) {
-        this.l1Cache.invalidateMatching((entry) => this.dependencyTracker!.shouldInvalidate(entry, envelope));
+        this.l1Cache.invalidateMatching((entry) =>
+          this.dependencyTracker!.shouldInvalidate(entry, envelope),
+        );
       } else {
         this.l1Cache.invalidateByStore(storeName);
       }

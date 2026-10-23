@@ -53,13 +53,22 @@ export type { WriteCoalescerOptions } from "./core/write-coalescer";
 export { serializeKey, isValidKey, toKeyString, hashQuery } from "./core/key-serializer";
 
 // ── Ports ──
-export type { IStoragePort, IStorageTransaction, StorageBatchOp, StorageEntry } from "./ports/storage.port";
+export type {
+  IStoragePort,
+  IStorageTransaction,
+  StorageBatchOp,
+  StorageEntry,
+} from "./ports/storage.port";
 export type { ISyncPort, MutationEnvelope } from "./ports/sync.port";
 export type { ILockPort } from "./ports/lock.port";
 export type { IDBMiddleware } from "./ports/middleware.port";
 
 // ── Adapters ──
-export { IndexedDBStorageAdapter, DatabaseClosingForUpgradeError, DatabaseMigrationError } from "./adapters/storage/idb-adapter";
+export {
+  IndexedDBStorageAdapter,
+  DatabaseClosingForUpgradeError,
+  DatabaseMigrationError,
+} from "./adapters/storage/idb-adapter";
 export { MemoryStorageAdapter } from "./adapters/storage/memory-adapter";
 export { runMigrations } from "./adapters/storage/migration-runner";
 export { BroadcastSyncAdapter } from "./adapters/sync/broadcast-adapter";
@@ -72,7 +81,11 @@ export {
   CryptographicContextUnavailableError,
   KeyNotFoundError,
 } from "./adapters/middleware/encryption";
-export type { KeyRing, EncryptedFieldEnvelope, EncryptionOptions } from "./adapters/middleware/encryption";
+export type {
+  KeyRing,
+  EncryptedFieldEnvelope,
+  EncryptionOptions,
+} from "./adapters/middleware/encryption";
 export { defaultSerializer } from "./adapters/middleware/serializer";
 export type { SerializationHook } from "./adapters/middleware/serializer";
 

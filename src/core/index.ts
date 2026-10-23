@@ -18,14 +18,20 @@ export type {
   FallbackConfig,
   ResolvedEngineConfig,
 } from "./config";
-export type { DatabaseDiagnosticsConfig, DatabaseDiagnosticEvent } from "./observability/diagnostics";
+export type {
+  DatabaseDiagnosticsConfig,
+  DatabaseDiagnosticEvent,
+} from "./observability/diagnostics";
 export { store, outOfLineStore, validateDatabaseSchema } from "../types/schema";
 export {
   DatabaseDestroyedError,
   DatabaseSchemaTransitionError,
   MiddlewareSchemaConflictError,
 } from "./errors";
-export { DatabaseClosingForUpgradeError, DatabaseMigrationError } from "../adapters/storage/idb-adapter";
+export {
+  DatabaseClosingForUpgradeError,
+  DatabaseMigrationError,
+} from "../adapters/storage/idb-adapter";
 export type {
   DatabaseConfig,
   DatabaseSchema,

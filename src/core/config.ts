@@ -64,7 +64,9 @@ export interface DatabaseRuntimeConfig {
 }
 
 /** Preferred factory input; all runtime concerns stay separate from the schema. */
-export interface DatabaseFactoryOptions<TSchema extends DatabaseSchema<any>> extends DatabaseRuntimeConfig {
+export interface DatabaseFactoryOptions<
+  TSchema extends DatabaseSchema<any>,
+> extends DatabaseRuntimeConfig {
   schema: TSchema;
 }
 
@@ -95,7 +97,7 @@ export function resolveEngineConfig(
   schema: DatabaseSchema<any>,
   config?: EngineConfig | DatabaseRuntimeConfig | ResolvedEngineConfig,
 ): ResolvedEngineConfig {
-  if (config && "__resolved" in config && config.__resolved === true) {
+  if (config && "__resolved" in config && config.__resolved) {
     return config as ResolvedEngineConfig;
   }
 
@@ -117,18 +119,18 @@ export function resolveEngineConfig(
         lock: legacy.lock,
       };
 
-  const middleware = modern
-    ? [...(runtime.middleware ?? [])]
-    : [...(legacy.middlewares ?? [])];
+  const middleware = modern ? [...(runtime.middleware ?? [])] : [...(legacy.middlewares ?? [])];
 
-  const cacheMaxEntries = runtime.cache?.maxEntries ?? schemaOptions?.cacheMaxEntries ?? DEFAULTS.cacheMaxEntries;
+  const cacheMaxEntries =
+    runtime.cache?.maxEntries ?? schemaOptions?.cacheMaxEntries ?? DEFAULTS.cacheMaxEntries;
   const cacheTtlMs = runtime.cache?.ttlMs ?? schemaOptions?.cacheTTLMs ?? DEFAULTS.cacheTtlMs;
   const coalesceWindowMs =
-    runtime.writes?.coalesceWindowMs ?? schemaOptions?.coalesceWindowMs ?? DEFAULTS.coalesceWindowMs;
-  const crossTabEnabled =
-    runtime.crossTab?.enabled ?? schemaOptions?.enableCrossTabSync ?? true;
+    runtime.writes?.coalesceWindowMs ??
+    schemaOptions?.coalesceWindowMs ??
+    DEFAULTS.coalesceWindowMs;
+  const crossTabEnabled = runtime.crossTab?.enabled ?? schemaOptions?.enableCrossTabSync ?? true;
   const fallbackStrategy =
-    runtime.fallback?.strategy ?? (schemaOptions?.fallbackToMemory === false ? "error" : "memory");
+    runtime.fallback?.strategy ?? ((schemaOptions?.fallbackToMemory ?? true) ? "memory" : "error");
   const requestPersistentStorage =
     runtime.fallback?.requestPersistentStorage ?? schemaOptions?.requestPersistentStorage ?? false;
 

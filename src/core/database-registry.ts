@@ -40,7 +40,7 @@ function getSchemaSignature(schema: DatabaseSchema<any>): string {
           keyPath: store.keyPath ?? null,
           autoIncrement: store.autoIncrement ?? false,
           indexes: Object.fromEntries(
-            Object.entries(store.indexes ?? {} as Record<string, IndexConfig<any>>)
+            Object.entries(store.indexes ?? ({} as Record<string, IndexConfig<any>>))
               .sort(([left], [right]) => left.localeCompare(right))
               .map(([indexName, index]) => [
                 indexName,
@@ -82,7 +82,9 @@ function sameMiddlewareChain(
   left: readonly ResolvedEngineConfig["middleware"][number][],
   right: readonly ResolvedEngineConfig["middleware"][number][],
 ): boolean {
-  return left.length === right.length && left.every((middleware, index) => middleware === right[index]);
+  return (
+    left.length === right.length && left.every((middleware, index) => middleware === right[index])
+  );
 }
 
 /** Return a registered engine without exposing the mutable registry itself. */
@@ -107,7 +109,8 @@ export function assertCompatibleEngineRegistration(
   if (registered.sync !== config.adapters.sync) conflicts.push("sync adapter");
   if (registered.lock !== config.adapters.lock) conflicts.push("lock adapter");
   if (!sameMiddlewareChain(registered.middleware, config.middleware)) conflicts.push("middleware");
-  if (registered.runtimeSignature !== getRuntimeSignature(config)) conflicts.push("runtime options");
+  if (registered.runtimeSignature !== getRuntimeSignature(config))
+    conflicts.push("runtime options");
 
   if (conflicts.length > 0) {
     throw new DatabaseConfigurationConflictError(schema.name, conflicts);

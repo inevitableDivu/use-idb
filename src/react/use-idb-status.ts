@@ -16,7 +16,12 @@ const SSR_STATUS_SNAPSHOT: IDBStatusSnapshot = Object.freeze({
     percentUsed: null,
     isPersisted: null,
   }),
-  refreshQuota: async () => ({ usageBytes: null, quotaBytes: null, percentUsed: null, isPersisted: null }),
+  refreshQuota: async () => ({
+    usageBytes: null,
+    quotaBytes: null,
+    percentUsed: null,
+    isPersisted: null,
+  }),
   reconnect: async () => {},
 });
 

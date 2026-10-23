@@ -488,13 +488,13 @@ const encryption = createEncryptionMiddleware(
 
 The package is designed to reduce avoidable database work, but performance depends on the browser, dataset, indexes, serialized value sizes, and query shape. The project does not currently publish a reproducible benchmark suite or enforce a bundle-size budget, so the following are implementation characteristics rather than numeric performance guarantees:
 
-| Area | Current design |
-| --- | --- |
-| Writes | Compatible operations queued within a microtask can share a readwrite transaction. |
-| React reads | Stable cache snapshots avoid an asynchronous storage read during every render. |
-| Query execution | Indexed ranges and cursor APIs are used where the query plan permits them; JavaScript filters and `orderBy` may scan and sort results in memory. |
-| React consistency | Hooks use `useSyncExternalStore` to integrate the cache with React rendering. |
-| Encryption | Optional AES-GCM field encryption uses authenticated additional data when a primary key is available. |
+| Area              | Current design                                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Writes            | Compatible operations queued within a microtask can share a readwrite transaction.                                                               |
+| React reads       | Stable cache snapshots avoid an asynchronous storage read during every render.                                                                   |
+| Query execution   | Indexed ranges and cursor APIs are used where the query plan permits them; JavaScript filters and `orderBy` may scan and sort results in memory. |
+| React consistency | Hooks use `useSyncExternalStore` to integrate the cache with React rendering.                                                                    |
+| Encryption        | Optional AES-GCM field encryption uses authenticated additional data when a primary key is available.                                            |
 
 ---
 
@@ -534,7 +534,6 @@ pnpm lint
 
 ---
 
-
 ---
 
 ## Runtime guarantees and configuration notes
@@ -544,10 +543,7 @@ pnpm lint
 The schema contains durable structure—database name/version, stores, indexes, and migrations. Prefer the grouped runtime API for tuning how the engine runs. The old `schema.options` and `createDatabase(schema, { storage, sync, lock, middlewares })` forms remain supported for compatibility.
 
 ```ts
-import {
-  createDatabase,
-  type DatabaseDiagnosticsConfig,
-} from "@inevitable_divu/use-idb";
+import { createDatabase, type DatabaseDiagnosticsConfig } from "@inevitable_divu/use-idb";
 
 const diagnostics: DatabaseDiagnosticsConfig = {
   onEvent(event) {
@@ -583,7 +579,6 @@ The runtime groups are validated up front. Cache defaults are `maxEntries: 1000`
 Fallback is limited to recognized IndexedDB availability/security failures; migration, schema, version, quota, and transaction failures remain visible. Memory storage is volatile and process-local. `requestPersistentStorage` is a best-effort browser request; the grant is browser-controlled and available in `useIDBStatus().persistentStorageGranted`. If `fallback.strategy` is `"error"`, unsupported environments fail rather than silently using memory storage.
 
 Diagnostics are opt-in. Events describe lifecycle and committed-operation metadata, not record payloads or keys. Event/error callbacks are best-effort: exceptions thrown by telemetry callbacks are swallowed so they cannot change the outcome of a storage operation.
-
 
 ### Typed out-of-line primary keys
 

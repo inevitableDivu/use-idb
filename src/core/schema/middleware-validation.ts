@@ -3,11 +3,7 @@ import type { IDBMiddleware } from "../../ports/middleware.port";
 import { MiddlewareSchemaConflictError } from "../errors";
 
 function pathsOverlap(left: string, right: string): boolean {
-  return (
-    left === right ||
-    left.startsWith(`${right}.`) ||
-    right.startsWith(`${left}.`)
-  );
+  return left === right || left.startsWith(`${right}.`) || right.startsWith(`${left}.`);
 }
 
 function keyPaths(path: string | readonly string[] | undefined): string[] {

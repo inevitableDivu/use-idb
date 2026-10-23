@@ -38,18 +38,24 @@ export class DatabaseSchemaTransitionError extends Error {
  */
 export class DatabaseDestroyedError extends Error {
   constructor(databaseName: string) {
-    super(`Database "${databaseName}" has been destroyed. Create a new Engine instance before using it again.`);
+    super(
+      `Database "${databaseName}" has been destroyed. Create a new Engine instance before using it again.`,
+    );
     this.name = "DatabaseDestroyedError";
   }
 }
-
 
 /**
  * Thrown when middleware transforms a primary-key or indexed path and would make normal
  * IndexedDB key/index lookups invalid or ambiguous.
  */
 export class MiddlewareSchemaConflictError extends Error {
-  constructor(middlewareName: string, storeName: string, transformedPath: string, protectedPath: string) {
+  constructor(
+    middlewareName: string,
+    storeName: string,
+    transformedPath: string,
+    protectedPath: string,
+  ) {
     super(
       `Middleware "${middlewareName}" transforms "${storeName}.${transformedPath}", which overlaps primary-key/index path "${storeName}.${protectedPath}". Do not encrypt or transform key/index paths; store searchable metadata separately.`,
     );

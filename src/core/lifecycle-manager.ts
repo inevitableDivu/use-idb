@@ -59,7 +59,8 @@ export class StorageLifecycleManager {
 
   private async requestPersistentStorage(storage: IStoragePort): Promise<boolean> {
     if (this.persistentRequest) return this.persistentRequest;
-    this.persistentRequest = storage.requestPersistentStorage?.().catch(() => false) ?? Promise.resolve(false);
+    this.persistentRequest =
+      storage.requestPersistentStorage?.().catch(() => false) ?? Promise.resolve(false);
     return this.persistentRequest;
   }
 

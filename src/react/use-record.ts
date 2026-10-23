@@ -211,11 +211,13 @@ export function useRecord<T extends object = Record<string, unknown>>(
         patchQueues.set(engine, queues);
       }
       const previous = queues.get(queueKey) ?? Promise.resolve();
-      const operation = previous.catch(() => {}).then(async () => {
-        const current = (await engine.get(storeName, key)) as T | undefined;
-        const next = { ...(current ?? {}), ...partialVal } as T;
-        await engine.put(storeName, next, key, { optimistic });
-      });
+      const operation = previous
+        .catch(() => {})
+        .then(async () => {
+          const current = (await engine.get(storeName, key)) as T | undefined;
+          const next = { ...(current ?? {}), ...partialVal } as T;
+          await engine.put(storeName, next, key, { optimistic });
+        });
       queues.set(queueKey, operation);
       try {
         await operation;

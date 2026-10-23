@@ -22,8 +22,14 @@ describe("live query dependency identity", () => {
     cyclic.self = cyclic;
     expect(() => hashDependencies([cyclic])).not.toThrow();
 
-    const left = new Map<unknown, unknown>([["a", 1], ["b", 2]]);
-    const right = new Map<unknown, unknown>([["b", 2], ["a", 1]]);
+    const left = new Map<unknown, unknown>([
+      ["a", 1],
+      ["b", 2],
+    ]);
+    const right = new Map<unknown, unknown>([
+      ["b", 2],
+      ["a", 1],
+    ]);
     expect(hashDependencies([left])).toBe(hashDependencies([right]));
 
     const setA = new Set(["a", "b"]);

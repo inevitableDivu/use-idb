@@ -22,9 +22,11 @@ import { compileQueryPlan, type QueryPlanSummary } from "./query/query-plan";
  * - If no JS filter, direction='next', offset=0 → native getAll() (5x faster)
  * - Otherwise → openCursor() with cursor.advance() for zero-allocation skipping
  */
-export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
-  implements QueryBuilderType<T, TStore, TResult>
-{
+export class QueryBuilder<
+  T extends object,
+  TStore = unknown,
+  TResult = T,
+> implements QueryBuilderType<T, TStore, TResult> {
   private ast: QueryAST<T>;
   private storage: IStoragePort;
   private middleware: MiddlewarePipeline | null;
@@ -83,10 +85,10 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
   private setField(field: string): void {
     const indexes = this.storeConfig?.indexes ?? {};
     const directIndex = indexes[field];
-    const propertyIndex = Object.entries(indexes).find(
-      ([, index]) => this.pathsEqual(index.keyPath, field),
+    const propertyIndex = Object.entries(indexes).find(([, index]) =>
+      this.pathsEqual(index.keyPath, field),
     );
-    const matchingIndex = directIndex ? [field, directIndex] as const : propertyIndex;
+    const matchingIndex = directIndex ? ([field, directIndex] as const) : propertyIndex;
     const fieldPath = matchingIndex?.[1].keyPath ?? field;
     const indexName = matchingIndex?.[0];
     const accessPathChanged =
@@ -145,15 +147,14 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
         this.comparisonPredicates.every((condition) => condition(record)) &&
         (previous ? previous(record) : true);
     }
-    this.ast.filterKey = this.ast.filterKey
-      ? `${this.ast.filterKey}&${filterKey}`
-      : filterKey;
+    this.ast.filterKey = this.ast.filterKey ? `${this.ast.filterKey}&${filterKey}` : filterKey;
     return this;
   }
 
   equals(value: IDBValidKey): this {
     const isPrimaryKey = this.isPrimaryField();
-    const optimized = Boolean(this.ast.indexName || isPrimaryKey) &&
+    const optimized =
+      Boolean(this.ast.indexName || isPrimaryKey) &&
       this.isIDBKey(value) &&
       this.ast.filterPredicate === undefined &&
       this.comparisonPredicates.length === 0;
@@ -204,7 +205,8 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
   }
 
   gt(value: IDBValidKey): this {
-    const optimized = Boolean(this.ast.indexName || this.isPrimaryField()) &&
+    const optimized =
+      Boolean(this.ast.indexName || this.isPrimaryField()) &&
       this.isIDBKey(value) &&
       this.ast.filterPredicate === undefined &&
       this.comparisonPredicates.length === 0;
@@ -218,7 +220,8 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
   }
 
   gte(value: IDBValidKey): this {
-    const optimized = Boolean(this.ast.indexName || this.isPrimaryField()) &&
+    const optimized =
+      Boolean(this.ast.indexName || this.isPrimaryField()) &&
       this.isIDBKey(value) &&
       this.ast.filterPredicate === undefined &&
       this.comparisonPredicates.length === 0;
@@ -232,7 +235,8 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
   }
 
   lt(value: IDBValidKey): this {
-    const optimized = Boolean(this.ast.indexName || this.isPrimaryField()) &&
+    const optimized =
+      Boolean(this.ast.indexName || this.isPrimaryField()) &&
       this.isIDBKey(value) &&
       this.ast.filterPredicate === undefined &&
       this.comparisonPredicates.length === 0;
@@ -246,7 +250,8 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
   }
 
   lte(value: IDBValidKey): this {
-    const optimized = Boolean(this.ast.indexName || this.isPrimaryField()) &&
+    const optimized =
+      Boolean(this.ast.indexName || this.isPrimaryField()) &&
       this.isIDBKey(value) &&
       this.ast.filterPredicate === undefined &&
       this.comparisonPredicates.length === 0;
@@ -260,17 +265,24 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
   }
 
   between(lower: IDBValidKey, upper: IDBValidKey, includeLower = true, includeUpper = true): this {
-    const optimized = Boolean(this.ast.indexName || this.isPrimaryField()) &&
+    const optimized =
+      Boolean(this.ast.indexName || this.isPrimaryField()) &&
       this.isIDBKey(lower) &&
       this.isIDBKey(upper) &&
       this.ast.filterPredicate === undefined &&
       this.comparisonPredicates.length === 0;
-    const result = this.compare((field) => {
-      const lowerComparison = this.compareValues(field, lower);
-      const upperComparison = this.compareValues(field, upper);
-      return (includeLower ? lowerComparison >= 0 : lowerComparison > 0) &&
-        (includeUpper ? upperComparison <= 0 : upperComparison < 0);
-    }, `between:${this.valueKey(lower)}:${this.valueKey(upper)}:${includeLower}:${includeUpper}`, !optimized);
+    const result = this.compare(
+      (field) => {
+        const lowerComparison = this.compareValues(field, lower);
+        const upperComparison = this.compareValues(field, upper);
+        return (
+          (includeLower ? lowerComparison >= 0 : lowerComparison > 0) &&
+          (includeUpper ? upperComparison <= 0 : upperComparison < 0)
+        );
+      },
+      `between:${this.valueKey(lower)}:${this.valueKey(upper)}:${includeLower}:${includeUpper}`,
+      !optimized,
+    );
     if (optimized) {
       this.ast.range = IDBKeyRange.bound(lower, upper, !includeLower, !includeUpper);
     } else {
@@ -284,9 +296,8 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
       this.ast.range = undefined;
       return;
     }
-    this.ast.range = bound === "lower"
-      ? IDBKeyRange.lowerBound(value, open)
-      : IDBKeyRange.upperBound(value, open);
+    this.ast.range =
+      bound === "lower" ? IDBKeyRange.lowerBound(value, open) : IDBKeyRange.upperBound(value, open);
   }
 
   startsWith(prefix: string): this {
@@ -307,18 +318,23 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
   private valueEquals(left: unknown, right: unknown): boolean {
     if (left instanceof Date && right instanceof Date) return left.getTime() === right.getTime();
     if (Array.isArray(left) && Array.isArray(right)) {
-      return left.length === right.length && left.every((value, index) => this.valueEquals(value, right[index]));
+      return (
+        left.length === right.length &&
+        left.every((value, index) => this.valueEquals(value, right[index]))
+      );
     }
-    const leftBinary = left instanceof ArrayBuffer
-      ? new Uint8Array(left)
-      : ArrayBuffer.isView(left)
-        ? new Uint8Array(left.buffer, left.byteOffset, left.byteLength)
-        : null;
-    const rightBinary = right instanceof ArrayBuffer
-      ? new Uint8Array(right)
-      : ArrayBuffer.isView(right)
-        ? new Uint8Array(right.buffer, right.byteOffset, right.byteLength)
-        : null;
+    const leftBinary =
+      left instanceof ArrayBuffer
+        ? new Uint8Array(left)
+        : ArrayBuffer.isView(left)
+          ? new Uint8Array(left.buffer, left.byteOffset, left.byteLength)
+          : null;
+    const rightBinary =
+      right instanceof ArrayBuffer
+        ? new Uint8Array(right)
+        : ArrayBuffer.isView(right)
+          ? new Uint8Array(right.buffer, right.byteOffset, right.byteLength)
+          : null;
     if (leftBinary || rightBinary) {
       return Boolean(
         leftBinary &&
@@ -386,7 +402,9 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
    */
   filter(predicate: QueryFilterPredicate<T>): this {
     const previous = this.ast.filterPredicate;
-    this.ast.filterPredicate = previous ? (record) => previous(record) && predicate(record) : predicate;
+    this.ast.filterPredicate = previous
+      ? (record) => previous(record) && predicate(record)
+      : predicate;
     this.ast.filterKey = this.ast.filterKey
       ? `${this.ast.filterKey}&filter:${predicate.toString()}`
       : `filter:${predicate.toString()}`;
@@ -460,9 +478,7 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
     this.throwIfAborted();
     const plan = compileQueryPlan(this.ast);
     const needsPostSort = plan.summary.requiresPostSort;
-    const ast = needsPostSort
-      ? { ...plan.ast, offsetCount: 0, limitCount: undefined }
-      : plan.ast;
+    const ast = needsPostSort ? { ...plan.ast, offsetCount: 0, limitCount: undefined } : plan.ast;
     let results: T[] = [];
     let resultKeys: (IDBValidKey | undefined)[] = [];
     if (
@@ -531,7 +547,9 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
         if (leftValue === rightValue) return 0;
         if (leftValue === undefined) return 1;
         if (rightValue === undefined) return -1;
-        return ((leftValue as string | number) < (rightValue as string | number) ? -1 : 1) * direction;
+        return (
+          ((leftValue as string | number) < (rightValue as string | number) ? -1 : 1) * direction
+        );
       });
     }
 
@@ -543,10 +561,14 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
     }
 
     if (this.ast.selectedFields) {
-      results = results.map((item) =>
-        Object.fromEntries(
-          this.ast.selectedFields!.map((field) => [field, (item as Record<string, unknown>)[field]]),
-        ) as T,
+      results = results.map(
+        (item) =>
+          Object.fromEntries(
+            this.ast.selectedFields!.map((field) => [
+              field,
+              (item as Record<string, unknown>)[field],
+            ]),
+          ) as T,
       );
     }
 

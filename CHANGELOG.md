@@ -5,6 +5,7 @@ Notable user-facing changes are recorded here. Versions are published only after
 ## 1.2.0 — Prepared release (2026-10-23)
 
 ### Reliability and correctness
+
 - Resolve IndexedDB write, delete, clear, and batch operations only after the owning transaction commits.
 - Avoid replaying user-provided transaction callbacks when retrying transient IndexedDB failures.
 - Serialize write-coalescer flushes per object store and drain pending operations before closing or destroying an engine.
@@ -18,6 +19,7 @@ Notable user-facing changes are recorded here. Versions are published only after
 - Turn off BroadcastChannel notifications when using isolated memory fallback storage.
 
 ### Developer experience
+
 - Implement the persistent-storage request option as a best-effort browser request.
 - Expose fallback reasons and a quota/persistence refresh action through the status API.
 - Validate writes against configured inline key paths, including writes inside explicit transactions.
@@ -26,6 +28,7 @@ Notable user-facing changes are recorded here. Versions are published only after
 - Document that live-query callbacks should be pure and that explicit transactions are not supported while middleware is enabled, because asynchronous middleware cannot safely run inside an active IndexedDB transaction.
 
 ### Migration notes
+
 - Explicit `db.transaction()` calls now throw `TransactionMiddlewareUnsupportedError` when any middleware is configured. This replaces unsafe behavior where encryption/serialization middleware could be bypassed. Use standard engine CRUD/batch APIs for those configurations.
 - Memory storage remains volatile and process-local. It is not a replacement for durable storage and does not provide cross-tab shared data.
 - Schema errors now surface before registration or during the upgrade rather than being silently converted into empty in-memory storage.

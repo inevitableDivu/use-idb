@@ -91,7 +91,10 @@ function encodeDependency(value: unknown, ancestors: WeakSet<object>): unknown {
         "object",
         Object.keys(value as Record<string, unknown>)
           .sort()
-          .map((key) => [key, encodeDependency((value as Record<string, unknown>)[key], ancestors)]),
+          .map((key) => [
+            key,
+            encodeDependency((value as Record<string, unknown>)[key], ancestors),
+          ]),
       ];
     } finally {
       ancestors.delete(objectValue);

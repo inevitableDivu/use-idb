@@ -36,7 +36,6 @@ describe("Pluggable & Rich Serialization", () => {
   });
 });
 
-
 describe("Versioned rich serializer compatibility", () => {
   it("round-trips ArrayBuffer, DataView, typed arrays, undefined, and special numbers", () => {
     const input = {
@@ -126,7 +125,9 @@ describe("Collision-safe IndexedDB key identity", () => {
     expect(toKeyString(new Uint8Array([1, 2]))).not.toBe(
       toKeyString(new Uint16Array(new Uint8Array([1, 2]).buffer)),
     );
-    expect(toKeyString(new Date("2026-01-01T00:00:00.000Z"))).not.toBe(toKeyString("2026-01-01T00:00:00.000Z"));
+    expect(toKeyString(new Date("2026-01-01T00:00:00.000Z"))).not.toBe(
+      toKeyString("2026-01-01T00:00:00.000Z"),
+    );
     expect(toKeyString(-0)).toBe(toKeyString(0));
     const bytes = new Uint8Array([1, 2, 3, 4]);
     expect(toKeyString(bytes.buffer)).not.toBe(toKeyString(new Uint16Array(bytes.buffer)));

@@ -32,9 +32,10 @@ import {
   unregisterEngine,
 } from "./database-registry";
 
-
-
-export { DatabaseConfigurationConflictError, TransactionMiddlewareUnsupportedError } from "./errors";
+export {
+  DatabaseConfigurationConflictError,
+  TransactionMiddlewareUnsupportedError,
+} from "./errors";
 
 /**
  * Retrieves an active Engine instance from the registry if one exists with the given name.
@@ -205,7 +206,9 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
         this.storage.close().catch(() => {});
         return;
       }
-      this.l1Cache.invalidateMatching((entry) => this.dependencyTracker.shouldInvalidate(entry, envelope));
+      this.l1Cache.invalidateMatching((entry) =>
+        this.dependencyTracker.shouldInvalidate(entry, envelope),
+      );
     });
   }
 
@@ -263,7 +266,10 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
     this.assertUsable();
     const raw = await this.storage.get(storeName, key);
     if (raw === undefined) return undefined;
-    return (await this.middlewarePipeline.runAfterRead(storeName, raw, key)) as StoreValue<TSchema, K>;
+    return (await this.middlewarePipeline.runAfterRead(storeName, raw, key)) as StoreValue<
+      TSchema,
+      K
+    >;
   }
 
   query<K extends StoreNames<TSchema>>(
@@ -273,9 +279,8 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
     TSchema["stores"][K]
   > {
     this.assertUsable();
-    type Item = StoreValue<TSchema, K> extends object
-      ? StoreValue<TSchema, K>
-      : Record<string, unknown>;
+    type Item =
+      StoreValue<TSchema, K> extends object ? StoreValue<TSchema, K> : Record<string, unknown>;
     return new QueryBuilder(
       this.storage,
       storeName,
@@ -292,12 +297,9 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
   ): Promise<StoreKey<TSchema, K>> {
     this.assertUsable();
     const resolvedKey = this.resolveWriteKey(storeName, value, key as IDBValidKey | undefined);
-    return this.writeCoalescer.put(
-      storeName,
-      value,
-      resolvedKey,
-      options,
-    ) as Promise<StoreKey<TSchema, K>>;
+    return this.writeCoalescer.put(storeName, value, resolvedKey, options) as Promise<
+      StoreKey<TSchema, K>
+    >;
   }
 
   /**
@@ -324,7 +326,9 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
         (typeof next === "object" || typeof next === "function") &&
         typeof (next as { then?: unknown }).then === "function"
       ) {
-        throw new TypeError("Database update callbacks must be synchronous; return the next record directly.");
+        throw new TypeError(
+          "Database update callbacks must be synchronous; return the next record directly.",
+        );
       }
       await tx.put(storeName, next, key as IDBValidKey);
       return next;
@@ -348,7 +352,11 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
     return results as StoreKey<TSchema, K>[];
   }
 
-  private resolveWriteKey(storeName: string, value: unknown, key?: IDBValidKey): IDBValidKey | undefined {
+  private resolveWriteKey(
+    storeName: string,
+    value: unknown,
+    key?: IDBValidKey,
+  ): IDBValidKey | undefined {
     const config = this.schema.stores[storeName];
     const keyPath = config?.keyPath;
     if (keyPath === undefined) return key;
@@ -383,9 +391,7 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
     return candidate;
   }
 
-  async getAll<K extends StoreNames<TSchema>>(
-    storeName: K,
-  ): Promise<StoreValue<TSchema, K>[]> {
+  async getAll<K extends StoreNames<TSchema>>(storeName: K): Promise<StoreValue<TSchema, K>[]> {
     this.assertUsable();
     const entries = this.storage.getAllWithKeys
       ? await this.storage.getAllWithKeys<StoreValue<TSchema, K>>(storeName)
@@ -414,7 +420,11 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
       // Field-encryption middleware authenticates ciphertext against the primary key.
       // Preserve the real key when the storage adapter can provide it.
       transformed.push(
-        (await this.middlewarePipeline.runAfterRead(storeName, entry.value, entry.key)) as StoreValue<TSchema, K>,
+        (await this.middlewarePipeline.runAfterRead(
+          storeName,
+          entry.value,
+          entry.key,
+        )) as StoreValue<TSchema, K>,
       );
     }
     return transformed;
@@ -468,7 +478,7 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
 
     const result = await this.storage.transaction(normalizedNames, mode, (tx) => {
       const guardedTransaction: IStorageTransaction = {
-        get: <T>(storeName: string, key: IDBValidKey) => tx.get<T>(storeName, key),
+        get: <TValue>(storeName: string, key: IDBValidKey) => tx.get<TValue>(storeName, key),
         put: (storeName: string, value: unknown, key?: IDBValidKey) =>
           tx.put(storeName, value, this.resolveWriteKey(storeName, value, key)),
         delete: (storeName: string, key: IDBValidKey) => tx.delete(storeName, key),

@@ -94,9 +94,10 @@ const DEFAULT_OPTIONS: L1CacheOptions = {
 function createSnapshot<T>(entry: CacheEntry<T>): QuerySnapshot<T> {
   let activeData: T | undefined = entry.data;
   if (entry.optimisticHasValue) {
-    activeData = entry.optimisticData === DELETED_SENTINEL
-      ? undefined
-      : (entry.optimisticData as T | undefined);
+    activeData =
+      entry.optimisticData === DELETED_SENTINEL
+        ? undefined
+        : (entry.optimisticData as T | undefined);
   }
 
   return Object.freeze({
@@ -215,7 +216,9 @@ export class L1Cache {
   markPending<T>(entry: CacheEntry<T>, storeNames: string[]): number {
     entry.requestId += 1;
     entry.status = "pending";
-    entry.generationByStoreAtStart = new Map(storeNames.map((store) => [store, this.getGeneration(store)]));
+    entry.generationByStoreAtStart = new Map(
+      storeNames.map((store) => [store, this.getGeneration(store)]),
+    );
     entry.generationAtStart = Math.max(0, ...entry.generationByStoreAtStart.values());
     this.updateEntrySnapshot(entry);
     return entry.requestId;
@@ -298,7 +301,11 @@ export class L1Cache {
    * Apply an optimistic overlay before the transaction commits.
    * Mutation IDs allow one failed write to roll back without erasing newer writes.
    */
-  setOptimistic<T>(entry: CacheEntry<T>, data: T | typeof DELETED_SENTINEL, mutationId?: string): void {
+  setOptimistic<T>(
+    entry: CacheEntry<T>,
+    data: T | typeof DELETED_SENTINEL,
+    mutationId?: string,
+  ): void {
     if (mutationId) {
       if (!entry.optimisticOverlays) entry.optimisticOverlays = new Map();
       entry.optimisticOverlays.set(mutationId, data);
@@ -345,9 +352,10 @@ export class L1Cache {
       return;
     }
     if (entry.optimisticHasValue) {
-      entry.data = entry.optimisticData === DELETED_SENTINEL
-        ? undefined
-        : (entry.optimisticData as T | undefined);
+      entry.data =
+        entry.optimisticData === DELETED_SENTINEL
+          ? undefined
+          : (entry.optimisticData as T | undefined);
     }
     entry.optimisticData = undefined;
     entry.optimisticHasValue = false;

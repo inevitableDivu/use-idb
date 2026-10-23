@@ -69,7 +69,10 @@ export function toKeyString(key: unknown): string {
         "object",
         Object.keys(value)
           .sort()
-          .map((propertyName) => [propertyName, encode((value as Record<string, unknown>)[propertyName])]),
+          .map((propertyName) => [
+            propertyName,
+            encode((value as Record<string, unknown>)[propertyName]),
+          ]),
       ];
     }
     if (typeof value === "function") return ["function", value.name];

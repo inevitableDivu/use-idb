@@ -55,7 +55,8 @@ export function createAdapterBundle(
       );
     }
     storage = new MemoryStorageAdapter(schema);
-    fallbackReason = "IndexedDB is unavailable in this environment. Memory storage is volatile and process-local.";
+    fallbackReason =
+      "IndexedDB is unavailable in this environment. Memory storage is volatile and process-local.";
   }
 
   if (storage instanceof MemoryStorageAdapter) {
@@ -67,7 +68,6 @@ export function createAdapterBundle(
 
   return { storage, sync, lock, fallbackReason };
 }
-
 
 /** Construct the package's supported in-memory fallback from the composition root. */
 export function createMemoryFallbackStorage(schema: DatabaseSchema<any>): IStoragePort {

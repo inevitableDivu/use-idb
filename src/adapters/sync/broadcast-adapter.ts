@@ -4,7 +4,11 @@ import type { ISyncPort, MutationEnvelope } from "../../ports/sync.port";
  * Validate untrusted BroadcastChannel data before it reaches cache invalidation logic.
  * Unversioned envelopes are accepted for compatibility with tabs running the previous release.
  */
-function isSafeIDBKey(value: unknown, depth = 0, ancestors = new WeakSet<object>()): value is IDBValidKey {
+function isSafeIDBKey(
+  value: unknown,
+  depth = 0,
+  ancestors = new WeakSet<object>(),
+): value is IDBValidKey {
   if (depth > 32 || value === null || value === undefined) return false;
   if (typeof value === "string") return true;
   if (typeof value === "number") return !Number.isNaN(value);
@@ -24,11 +28,19 @@ export function isMutationEnvelope(data: unknown): data is MutationEnvelope {
   if (data === null || typeof data !== "object") return false;
   const env = data as Partial<MutationEnvelope>;
   if (env.version !== undefined && env.version !== 1) return false;
-  if (typeof env.originTabId !== "string" || env.originTabId.length === 0 || env.originTabId.length > 128) {
+  if (
+    typeof env.originTabId !== "string" ||
+    env.originTabId.length === 0 ||
+    env.originTabId.length > 128
+  ) {
     return false;
   }
   if (typeof env.timestamp !== "number" || !Number.isFinite(env.timestamp)) return false;
-  if (typeof env.storeName !== "string" || env.storeName.length === 0 || env.storeName.length > 256) {
+  if (
+    typeof env.storeName !== "string" ||
+    env.storeName.length === 0 ||
+    env.storeName.length > 256
+  ) {
     return false;
   }
   if (
@@ -80,9 +92,8 @@ export class BroadcastSyncAdapter implements ISyncPort {
         }
         // Normalize unversioned legacy messages before they reach code that treats the
         // envelope as the current public type.
-        const envelope: MutationEnvelope = event.data.version === undefined
-          ? { ...event.data, version: 1 }
-          : event.data;
+        const envelope: MutationEnvelope =
+          event.data.version === undefined ? { ...event.data, version: 1 } : event.data;
         // Filter out self-originated events
         if (envelope.originTabId === this.tabId) return;
         for (const listener of this.listeners) {

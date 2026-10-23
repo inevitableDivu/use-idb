@@ -1,7 +1,12 @@
 import type { DatabaseSchema } from "../../types/schema";
 import type { ConnectionState, StorageQuota } from "../../types/status";
 import type { QueryAST } from "../../types/query";
-import type { IStoragePort, IStorageTransaction, StorageBatchOp, StorageEntry } from "../../ports/storage.port";
+import type {
+  IStoragePort,
+  IStorageTransaction,
+  StorageBatchOp,
+  StorageEntry,
+} from "../../ports/storage.port";
 import type { ILockPort } from "../../ports/lock.port";
 import type { ISyncPort } from "../../ports/sync.port";
 import { runMigrations } from "./migration-runner";
@@ -24,7 +29,9 @@ export class DatabaseMigrationError extends Error {
 
   constructor(databaseName: string, oldVersion: number, newVersion: number, cause: unknown) {
     const detail = cause instanceof Error ? cause.message : String(cause);
-    super(`Failed to upgrade database "${databaseName}" from version ${oldVersion} to ${newVersion}: ${detail}`);
+    super(
+      `Failed to upgrade database "${databaseName}" from version ${oldVersion} to ${newVersion}: ${detail}`,
+    );
     this.name = "DatabaseMigrationError";
     this.cause = cause;
   }
@@ -250,10 +257,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
 
   // ── Safari Auto-Healing & Contention Guards ──
 
-  private async executeWithRetry<T>(
-    fn: (db: IDBDatabase) => Promise<T>,
-    retry = true,
-  ): Promise<T> {
+  private async executeWithRetry<T>(fn: (db: IDBDatabase) => Promise<T>, retry = true): Promise<T> {
     await this.ensureOpen();
     try {
       return await fn(this.db!);
@@ -361,7 +365,8 @@ export class IndexedDBStorageAdapter implements IStoragePort {
 
           req.onerror = () => reject(req.error);
           tx.onerror = () => reject(tx.error);
-          tx.onabort = () => reject(tx.error ?? new DOMException("Read transaction aborted", "AbortError"));
+          tx.onabort = () =>
+            reject(tx.error ?? new DOMException("Read transaction aborted", "AbortError"));
         }),
     );
   }
@@ -385,7 +390,10 @@ export class IndexedDBStorageAdapter implements IStoragePort {
           req.onerror = () => reject(req.error);
           tx.oncomplete = () => {
             if (resultKey !== undefined) resolve(resultKey);
-            else reject(new DOMException("Write transaction completed without a key.", "UnknownError"));
+            else
+              reject(
+                new DOMException("Write transaction completed without a key.", "UnknownError"),
+              );
           };
           tx.onerror = () => reject(tx.error ?? req.error);
           tx.onabort = () =>
@@ -489,7 +497,8 @@ export class IndexedDBStorageAdapter implements IStoragePort {
             }
 
             tx.oncomplete = () => resolve(results);
-            tx.onerror = () => reject(tx.error ?? new DOMException("Batch transaction failed", "UnknownError"));
+            tx.onerror = () =>
+              reject(tx.error ?? new DOMException("Batch transaction failed", "UnknownError"));
             tx.onabort = () =>
               reject(tx.error ?? new DOMException("Batch transaction aborted", "AbortError"));
           }),
@@ -552,11 +561,12 @@ export class IndexedDBStorageAdapter implements IStoragePort {
                 const store = tx.objectStore(storeName);
                 // Inline-key stores derive their key from the value; an explicit key is
                 // validated by Engine before this port is called and is not passed to IDB.
-                const req = store.keyPath !== null
-                  ? store.put(value)
-                  : key !== undefined
-                    ? store.put(value, key)
-                    : store.put(value);
+                const req =
+                  store.keyPath !== null
+                    ? store.put(value)
+                    : key !== undefined
+                      ? store.put(value, key)
+                      : store.put(value);
                 req.onsuccess = () => res(req.result);
                 req.onerror = () => rej(req.error);
               });
@@ -607,10 +617,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
     return (await this.cursorWithKeys(ast, signal)).map((entry) => entry.value);
   }
 
-  async cursorWithKeys<T>(
-    ast: QueryAST<T>,
-    signal?: AbortSignal,
-  ): Promise<StorageEntry<T>[]> {
+  async cursorWithKeys<T>(ast: QueryAST<T>, signal?: AbortSignal): Promise<StorageEntry<T>[]> {
     if (signal?.aborted) {
       throw new DOMException("The query was aborted.", "AbortError");
     }
@@ -618,10 +625,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
 
     // A signal requires a cancellable cursor transaction; the native getAll fast path can't abort.
     const canUseFastPath =
-      !signal &&
-      !ast.filterPredicate &&
-      ast.direction === "next" &&
-      ast.offsetCount === 0;
+      !signal && !ast.filterPredicate && ast.direction === "next" && ast.offsetCount === 0;
 
     if (canUseFastPath) {
       return this.getAllWithKeys<T>(ast.storeName, ast.indexName, ast.range, ast.limitCount);
@@ -717,11 +721,14 @@ export class IndexedDBStorageAdapter implements IStoragePort {
               reject(
                 signal?.aborted
                   ? new DOMException("The query was aborted.", "AbortError")
-                  : tx.error ?? new DOMException("Query transaction aborted.", "AbortError"),
+                  : (tx.error ?? new DOMException("Query transaction aborted.", "AbortError")),
               ),
             );
           tx.onerror = () => {
-            if (!settled) settle(() => reject(tx.error ?? new DOMException("Query transaction failed.", "UnknownError")));
+            if (!settled)
+              settle(() =>
+                reject(tx.error ?? new DOMException("Query transaction failed.", "UnknownError")),
+              );
           };
         }),
     );
@@ -738,8 +745,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
         usage !== null && quota !== null && quota > 0
           ? Math.round((usage / quota) * 1000) / 10
           : null;
-      const isPersisted =
-        navigator.storage.persisted ? await navigator.storage.persisted() : null;
+      const isPersisted = navigator.storage.persisted ? await navigator.storage.persisted() : null;
 
       return {
         usageBytes: usage,

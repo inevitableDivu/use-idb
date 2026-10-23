@@ -20,7 +20,10 @@ describe("Database Lifecycle & Upgrade Safety", () => {
       version: 1,
       stores: { records: { keyPath: "id" } },
     };
-    const middleware = { name: "test-middleware", beforeWrite: (ctx: { value: unknown }) => ctx.value };
+    const middleware = {
+      name: "test-middleware",
+      beforeWrite: (ctx: { value: unknown }) => ctx.value,
+    };
     const config = { middlewares: [middleware] };
 
     const first = createDatabase(schema, config);
@@ -36,8 +39,14 @@ describe("Database Lifecycle & Upgrade Safety", () => {
       version: 1,
       stores: { records: { keyPath: "id" } },
     };
-    const keyA = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
-    const keyB = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const keyA = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
+      "encrypt",
+      "decrypt",
+    ]);
+    const keyB = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
+      "encrypt",
+      "decrypt",
+    ]);
     const first = createDatabase(schema, {
       storage: new MemoryStorageAdapter(),
       middlewares: [createEncryptionMiddleware(keyA, ["secret"])],
@@ -62,10 +71,7 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     const first = createDatabase(schema, { storage: new MemoryStorageAdapter() });
 
     expect(() =>
-      createDatabase(
-        { ...schema, version: 2 },
-        { storage: new MemoryStorageAdapter() },
-      ),
+      createDatabase({ ...schema, version: 2 }, { storage: new MemoryStorageAdapter() }),
     ).toThrow(/schema/);
 
     expect(() =>
@@ -76,11 +82,14 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     ).toThrow(/schema/);
 
     expect(() =>
-      createDatabase(schema, { storage: first.storage, sync: { 
-        subscribe: () => () => {},
-        publish: () => {},
-        close: () => {},
-      } as any }),
+      createDatabase(schema, {
+        storage: first.storage,
+        sync: {
+          subscribe: () => () => {},
+          publish: () => {},
+          close: () => {},
+        } as any,
+      }),
     ).toThrow(/sync adapter/);
 
     await first.destroy();
@@ -206,7 +215,6 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     await memory.close();
   });
 
-
   it("provides an atomic synchronous update primitive", async () => {
     const db = createDatabase(
       {
@@ -232,7 +240,6 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     ).rejects.toThrow(/must be synchronous/);
     await db.destroy();
   });
-
 
   it("requires an explicit migration to change a store primary key", async () => {
     const name = "explicit-primary-key-migration-db";
@@ -285,7 +292,6 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     await versionTwoWithMigration.destroy();
   });
 
-
   it("does not report or cache a batch whose IndexedDB transaction aborts", async () => {
     const db = createDatabase({
       name: "indexeddb-atomic-batch-abort-db",
@@ -316,13 +322,11 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     await db.destroy();
   });
 
-
   it("rejects middleware that transforms primary keys or indexed fields", async () => {
-    const key = await crypto.subtle.generateKey(
-      { name: "AES-GCM", length: 256 },
-      true,
-      ["encrypt", "decrypt"],
-    );
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
+      "encrypt",
+      "decrypt",
+    ]);
 
     expect(() =>
       createDatabase(
@@ -389,5 +393,4 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     expect(await db.get("events", "event-1")).toMatchObject({ kind: "created" });
     await db.destroy();
   });
-
 });

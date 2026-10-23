@@ -123,10 +123,7 @@ export class MemoryStorageAdapter implements IStoragePort {
     return this.schema?.stores[storeName] as StoreConfig | undefined;
   }
 
-  private ensureStoreIn(
-    storeName: string,
-    stores: Map<string, StoreData>,
-  ): StoreData {
+  private ensureStoreIn(storeName: string, stores: Map<string, StoreData>): StoreData {
     let store = stores.get(storeName);
     if (!store) {
       store = new Map();
@@ -223,11 +220,20 @@ export class MemoryStorageAdapter implements IStoragePort {
     let candidate = explicitKey;
     if (keyPath !== undefined) {
       const inlineKey = this.extractIndexValue(value, keyPath) as IDBValidKey | undefined;
-      if (explicitKey !== undefined && (!isValidKey(inlineKey) || !sameKey(explicitKey, inlineKey))) {
+      if (
+        explicitKey !== undefined &&
+        (!isValidKey(inlineKey) || !sameKey(explicitKey, inlineKey))
+      ) {
         throw dataError("The supplied key does not match the store's inline keyPath.");
       }
       candidate = inlineKey;
-    } else if (candidate === undefined && !this.schema && value !== null && typeof value === "object" && "id" in value) {
+    } else if (
+      candidate === undefined &&
+      !this.schema &&
+      value !== null &&
+      typeof value === "object" &&
+      "id" in value
+    ) {
       // Backward-compatible convenience mode for direct adapter users without a schema.
       const id = (value as Record<string, unknown>).id;
       if (isValidKey(id)) candidate = id;
@@ -263,13 +269,16 @@ export class MemoryStorageAdapter implements IStoragePort {
       for (const existing of records.values()) {
         if (sameKey(existing.key, key)) continue;
         const existingValue = this.extractIndexValue(existing.value, keyPath);
-        const existingKeys = index.multiEntry && Array.isArray(existingValue)
-          ? existingValue
-          : [existingValue];
+        const existingKeys =
+          index.multiEntry && Array.isArray(existingValue) ? existingValue : [existingValue];
 
         for (const candidate of newKeys) {
           if (!isValidKey(candidate)) continue;
-          if (existingKeys.some((existingKey) => isValidKey(existingKey) && sameKey(existingKey, candidate))) {
+          if (
+            existingKeys.some(
+              (existingKey) => isValidKey(existingKey) && sameKey(existingKey, candidate),
+            )
+          ) {
             throw new DOMException(
               `Unique index constraint failed for "${storeName}.${indexName}".`,
               "ConstraintError",
@@ -319,12 +328,9 @@ export class MemoryStorageAdapter implements IStoragePort {
     const matched: Array<{ entry: StorageEntry<T>; orderKey: IDBValidKey }> = [];
 
     for (const record of store.values()) {
-      const target = indexName
-        ? this.extractIndexValue(record.value, indexPath)
-        : record.key;
-      const keys = indexName && indexConfig?.multiEntry && Array.isArray(target)
-        ? target
-        : [target];
+      const target = indexName ? this.extractIndexValue(record.value, indexPath) : record.key;
+      const keys =
+        indexName && indexConfig?.multiEntry && Array.isArray(target) ? target : [target];
       const seen = new Set<string>();
       for (const indexKey of keys) {
         if (!isValidKey(indexKey) || !this.matchesRange(indexKey, range)) continue;
@@ -338,8 +344,9 @@ export class MemoryStorageAdapter implements IStoragePort {
       }
     }
 
-    matched.sort((left, right) =>
-      compareKeys(left.orderKey, right.orderKey) || compareKeys(left.entry.key, right.entry.key),
+    matched.sort(
+      (left, right) =>
+        compareKeys(left.orderKey, right.orderKey) || compareKeys(left.entry.key, right.entry.key),
     );
     const limited = limit === undefined ? matched : matched.slice(0, limit);
     return limited.map((item) => item.entry);
@@ -375,13 +382,11 @@ export class MemoryStorageAdapter implements IStoragePort {
     if (range === undefined && !indexName) return store.size;
 
     const resolvedPath = indexName
-      ? keyPath ?? this.indexKeyPath(storeName, indexName)
+      ? (keyPath ?? this.indexKeyPath(storeName, indexName))
       : undefined;
     let total = 0;
     for (const record of store.values()) {
-      const target = indexName
-        ? this.extractIndexValue(record.value, resolvedPath)
-        : record.key;
+      const target = indexName ? this.extractIndexValue(record.value, resolvedPath) : record.key;
       if (multiEntry && Array.isArray(target)) {
         const seen = new Set<string>();
         for (const entry of target) {
@@ -403,12 +408,15 @@ export class MemoryStorageAdapter implements IStoragePort {
     if (ops.length === 0) return [];
     // Apply to a staging copy so any key/constraint failure rolls back the entire batch.
     const stagedStores = new Map(this.stores);
-    stagedStores.set(storeName, new Map(
-      Array.from(this.ensureStore(storeName), ([id, record]) => [
-        id,
-        { key: cloneValue(record.key), value: cloneValue(record.value) },
-      ]),
-    ));
+    stagedStores.set(
+      storeName,
+      new Map(
+        Array.from(this.ensureStore(storeName), ([id, record]) => [
+          id,
+          { key: cloneValue(record.key), value: cloneValue(record.value) },
+        ]),
+      ),
+    );
     const stagedCounters = new Map(this.autoIncrementCounters);
     const results: (IDBValidKey | undefined)[] = [];
 
@@ -444,28 +452,41 @@ export class MemoryStorageAdapter implements IStoragePort {
     const stagedStores = new Map<string, StoreData>();
     for (const name of uniqueNames) {
       const live = this.ensureStore(name);
-      stagedStores.set(name, new Map(
-        Array.from(live, ([id, record]) => [
-          id,
-          { key: cloneValue(record.key), value: cloneValue(record.value) },
-        ]),
-      ));
+      stagedStores.set(
+        name,
+        new Map(
+          Array.from(live, ([id, record]) => [
+            id,
+            { key: cloneValue(record.key), value: cloneValue(record.value) },
+          ]),
+        ),
+      );
     }
     const stagedCounters = new Map(this.autoIncrementCounters);
-    const startingVersions = new Map(uniqueNames.map((name) => [name, this.storeVersions.get(name) ?? 0]));
+    const startingVersions = new Map(
+      uniqueNames.map((name) => [name, this.storeVersions.get(name) ?? 0]),
+    );
     const dirty = new Set<string>();
 
     const assertWritable = (storeName: string) => {
-      if (mode !== "readwrite") throw new DOMException("A readonly transaction cannot modify data.", "ReadOnlyError");
+      if (mode !== "readwrite")
+        throw new DOMException("A readonly transaction cannot modify data.", "ReadOnlyError");
       if (!stagedStores.has(storeName)) {
-        throw new DOMException(`Object store "${storeName}" is outside this transaction.`, "NotFoundError");
+        throw new DOMException(
+          `Object store "${storeName}" is outside this transaction.`,
+          "NotFoundError",
+        );
       }
       dirty.add(storeName);
     };
     const tx: IStorageTransaction = {
       get: async <V>(storeName: string, key: IDBValidKey): Promise<V | undefined> => {
         const store = stagedStores.get(storeName);
-        if (!store) throw new DOMException(`Object store "${storeName}" is outside this transaction.`, "NotFoundError");
+        if (!store)
+          throw new DOMException(
+            `Object store "${storeName}" is outside this transaction.`,
+            "NotFoundError",
+          );
         const record = store.get(keyIdentity(key));
         return record ? cloneValue(record.value as V) : undefined;
       },
@@ -514,7 +535,7 @@ export class MemoryStorageAdapter implements IStoragePort {
     const store = this.ensureStore(ast.storeName);
     const matched: Array<{ entry: StorageEntry<T>; orderKey: IDBValidKey }> = [];
     const indexPath = ast.indexName
-      ? ast.fieldPath ?? this.indexKeyPath(ast.storeName, ast.indexName)
+      ? (ast.fieldPath ?? this.indexKeyPath(ast.storeName, ast.indexName))
       : undefined;
 
     for (const record of store.values()) {
@@ -534,8 +555,9 @@ export class MemoryStorageAdapter implements IStoragePort {
       }
     }
 
-    matched.sort((left, right) =>
-      compareKeys(left.orderKey, right.orderKey) || compareKeys(left.entry.key, right.entry.key),
+    matched.sort(
+      (left, right) =>
+        compareKeys(left.orderKey, right.orderKey) || compareKeys(left.entry.key, right.entry.key),
     );
     if (ast.direction === "prev" || ast.direction === "prevunique") matched.reverse();
 

@@ -31,9 +31,7 @@ export class MutationCoordinator {
     this.syncPort = syncPort;
   }
 
-  afterStoreCommit(
-    mutation: CommittedStoreMutation,
-  ): MutationEnvelope {
+  afterStoreCommit(mutation: CommittedStoreMutation): MutationEnvelope {
     const affectedKeys = mutation.affectedKeys ?? [];
     this.cache.incrementGeneration(mutation.storeName);
 

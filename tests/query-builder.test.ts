@@ -125,15 +125,19 @@ describe("QueryBuilder", () => {
     expect(await db.query("users").where("role").equals("admin").toArray()).toHaveLength(1);
     expect(await db.query("users").where("role").equals("admin").count()).toBe(1);
     expect(await db.query("users").where("by_role").equals("user").toArray()).toHaveLength(1);
-    expect(await db.query("users").where("id").equals("u2").first()).toMatchObject({ role: "user" });
+    expect(await db.query("users").where("id").equals("u2").first()).toMatchObject({
+      role: "user",
+    });
     expect(await db.query("users").where("role").notEquals("admin").toArray()).toHaveLength(1);
-    expect(await db.query("users").where("role").anyOf(["admin", "user"]).toArray()).toHaveLength(2);
-    expect(await db.query("users").where("email").equals("user@example.test").first()).toMatchObject({
+    expect(await db.query("users").where("role").anyOf(["admin", "user"]).toArray()).toHaveLength(
+      2,
+    );
+    expect(
+      await db.query("users").where("email").equals("user@example.test").first(),
+    ).toMatchObject({
       id: "u2",
     });
-    expect(
-      await db.query("users").where("active").equals(true).toArray(),
-    ).toHaveLength(1);
+    expect(await db.query("users").where("active").equals(true).toArray()).toHaveLength(1);
     expect(
       await db.query("users").orderBy("role", "desc").limit(1).select("email").toArray(),
     ).toEqual([{ email: "user@example.test" }]);
@@ -193,10 +197,13 @@ describe("QueryBuilder", () => {
     await db.put("records", { id: "r2", tags: ["typescript"] });
     await db.put("records", { id: "r3", tags: ["react"] });
 
-    expect(await db.query("records").where("by_tag").equals("typescript").toArray()).toHaveLength(2);
+    expect(await db.query("records").where("by_tag").equals("typescript").toArray()).toHaveLength(
+      2,
+    );
     expect(await db.query("records").where("by_tag").equals("typescript").count()).toBe(2);
-    expect(await db.query("records").where("by_tag").anyOf(["typescript", "indexeddb"]).toArray())
-      .toHaveLength(3);
+    expect(
+      await db.query("records").where("by_tag").anyOf(["typescript", "indexeddb"]).toArray(),
+    ).toHaveLength(3);
   });
 
   it("infers compound primary keys as tuples", async () => {
@@ -267,7 +274,6 @@ describe("QueryBuilder", () => {
     await db.destroy();
   });
 
-
   it("supports typed out-of-line primary keys", async () => {
     interface AuditEvent {
       type: "created" | "updated";
@@ -292,7 +298,11 @@ describe("QueryBuilder", () => {
     // @ts-expect-error Stored values must match the declared event shape.
     db.put("events", { type: "deleted", occurredAt: new Date() }, "event-2");
 
-    await db.put("events", { type: "created", occurredAt: new Date("2026-10-23T00:00:00.000Z") }, "event-1");
+    await db.put(
+      "events",
+      { type: "created", occurredAt: new Date("2026-10-23T00:00:00.000Z") },
+      "event-1",
+    );
     expect(await db.get("events", "event-1")).toMatchObject({ type: "created" });
     expect(await db.query("events").where("by_type").equals("created").count()).toBe(1);
     await db.destroy();
@@ -330,5 +340,4 @@ describe("QueryBuilder", () => {
     });
     await db.destroy();
   });
-
 });

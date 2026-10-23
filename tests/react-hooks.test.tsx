@@ -191,11 +191,10 @@ describe("React Hooks", () => {
       const { result } = renderHook(
         () =>
           useLiveQuery<{ id: string; text: string }[]>(
-            (client) =>
-              client.query("todos").toArray() as Promise<{ id: string; text: string }[]>,
+            (client) => client.query("todos").toArray() as Promise<{ id: string; text: string }[]>,
             [],
             {
-            initialData: [],
+              initialData: [],
             },
           ),
         { wrapper },
@@ -227,8 +226,7 @@ describe("React Hooks", () => {
 
       function SuspenseComponent() {
         const { data } = useLiveQuery<{ id: string; title: string }[]>(
-          (engine) =>
-            engine.query("items").toArray() as Promise<{ id: string; title: string }[]>,
+          (engine) => engine.query("items").toArray() as Promise<{ id: string; title: string }[]>,
           [],
           { suspense: true },
           db,

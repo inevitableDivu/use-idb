@@ -121,7 +121,9 @@ export function useLiveQuery<T>(
       const result = queryFnRef.current(trackedEngine, { signal: new AbortController().signal });
       const builder = result instanceof QueryBuilder ? result : queryBuilders[0];
       if (builder) {
-        const names = [...new Set(queryBuilders.map((queryBuilder) => queryBuilder.getAST().storeName))];
+        const names = [
+          ...new Set(queryBuilders.map((queryBuilder) => queryBuilder.getAST().storeName)),
+        ];
         const ast = builder.getAST();
         if (names.length > 1) {
           ast.range = undefined;
@@ -188,8 +190,7 @@ export function useLiveQuery<T>(
         return data;
       } catch (err) {
         const aborted =
-          controller.signal.aborted ||
-          (err instanceof Error && err.name === "AbortError");
+          controller.signal.aborted || (err instanceof Error && err.name === "AbortError");
         if (aborted) {
           engine.l1Cache.cancel(entry, requestId);
         } else {
