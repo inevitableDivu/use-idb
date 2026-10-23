@@ -2,6 +2,15 @@ import type { ConnectionState, StorageQuota } from "../types/status";
 import type { QueryAST } from "../types/query";
 
 /**
+ * A stored value paired with its actual IndexedDB primary key.
+ * Key-aware reads are required by middleware that authenticates data against its storage key.
+ */
+export interface StorageEntry<T> {
+  key: IDBValidKey;
+  value: T;
+}
+
+/**
  * Individual atomic operation within a storage batch.
  */
 export interface StorageBatchOp {
@@ -87,6 +96,17 @@ export interface IStoragePort {
   ): Promise<T[]>;
 
   /**
+   * Retrieves records together with their actual primary keys when supported by the adapter.
+   * Optional to preserve compatibility with custom storage adapters.
+   */
+  getAllWithKeys?<T>(
+    storeName: string,
+    indexName?: string,
+    range?: IDBKeyRange | IDBValidKey,
+    limit?: number,
+  ): Promise<StorageEntry<T>[]>;
+
+  /**
    * Writes a record directly to storage.
    */
   put(storeName: string, value: unknown, key?: IDBValidKey): Promise<IDBValidKey>;
@@ -130,6 +150,11 @@ export interface IStoragePort {
    * Compiles and executes an abstract syntax tree query via native getAll or IDBCursor.
    */
   cursor<T>(ast: QueryAST<T>): Promise<T[]>;
+
+  /**
+   * Executes a query and returns each result with its actual primary key when supported.
+   */
+  cursorWithKeys?<T>(ast: QueryAST<T>): Promise<StorageEntry<T>[]>;
 
   /**
    * Queries storage quota and usage from the browser.
