@@ -33,6 +33,29 @@ describe("Zombie Read Prevention (Race Condition Handling)", () => {
     expect(entry.snapshot.data).toEqual({ id: "1", name: "Alice (Edited)" });
   });
 
+  it("discards out-of-order reads even when no mutation changed the store generation", () => {
+    const cache = new L1Cache();
+    const entry = cache.getOrCreateEntry<string>("record:users:race", ["users"], "race");
+    const olderRequest = cache.markPending(entry, ["users"]);
+    const newerRequest = cache.markPending(entry, ["users"]);
+
+    expect(cache.resolve(entry, "newer", newerRequest)).toBe(true);
+    expect(cache.resolve(entry, "older", olderRequest)).toBe(false);
+    expect(entry.snapshot.data).toBe("newer");
+  });
+
+  it("ignores an old request error after a newer request succeeds", () => {
+    const cache = new L1Cache();
+    const entry = cache.getOrCreateEntry<string>("record:users:error-race", ["users"], "error-race");
+    const oldRequest = cache.markPending(entry, ["users"]);
+    const newRequest = cache.markPending(entry, ["users"]);
+
+    cache.resolve(entry, "fresh", newRequest);
+    cache.reject(entry, new Error("stale failure"), oldRequest);
+    expect(entry.snapshot.data).toBe("fresh");
+    expect(entry.snapshot.error).toBeNull();
+  });
+
   it("accepts read results when no mutations occurred during read", async () => {
     const db = createDatabase({
       name: "test-read-db",
