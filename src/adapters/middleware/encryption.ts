@@ -197,33 +197,33 @@ export function createEncryptionMiddleware(
     }
   }
 
-  /**
- * Canonical, type-tagged representation of an IndexedDB key for AAD.
- * JSON-encoding the tagged tree avoids collisions between e.g. number 1 and
- * string "1", or compound keys whose string elements contain delimiters.
- * Binary views encode only their visible byte range, not the backing buffer.
- */
-function serializeAadKey(key: IDBValidKey): string {
-  const encode = (value: IDBValidKey): unknown => {
-    if (typeof value === "string") return ["string", value];
-    if (typeof value === "number") return ["number", Object.is(value, -0) ? 0 : value];
-    if (value instanceof Date) return ["date", value.getTime()];
-    if (Array.isArray(value)) return ["array", value.map((part) => encode(part))];
-    if (value instanceof ArrayBuffer) {
-      return ["binary", Array.from(new Uint8Array(value))];
-    }
-    if (ArrayBuffer.isView(value)) {
-      return [
-        "binary",
-        Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)),
-      ];
-    }
-    throw new TypeError("Unsupported IndexedDB key in encryption context.");
-  };
-  return JSON.stringify(encode(key));
-}
-
-function computeAad(storeName: string, key: IDBValidKey | undefined, fieldPath: string): Uint8Array<ArrayBuffer> {
+    /**
+   * Canonical, type-tagged representation of an IndexedDB key for AAD.
+   * JSON-encoding the tagged tree avoids collisions between e.g. number 1 and
+   * string "1", or compound keys whose string elements contain delimiters.
+   * Binary views encode only their visible byte range, not the backing buffer.
+   */
+  function serializeAadKey(key: IDBValidKey): string {
+    const encode = (value: IDBValidKey): unknown => {
+      if (typeof value === "string") return ["string", value];
+      if (typeof value === "number") return ["number", Object.is(value, -0) ? 0 : value];
+      if (value instanceof Date) return ["date", value.getTime()];
+      if (Array.isArray(value)) return ["array", value.map((part) => encode(part))];
+      if (value instanceof ArrayBuffer) {
+        return ["binary", Array.from(new Uint8Array(value))];
+      }
+      if (ArrayBuffer.isView(value)) {
+        return [
+          "binary",
+          Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)),
+        ];
+      }
+      throw new TypeError("Unsupported IndexedDB key in encryption context.");
+    };
+    return JSON.stringify(encode(key));
+  }
+  
+  function computeAad(storeName: string, key: IDBValidKey | undefined, fieldPath: string): Uint8Array<ArrayBuffer> {
     const keyRepr = key !== undefined ? serializeAadKey(key) : "*";
     const aadStr = `v1:${storeName}:${keyRepr}:${fieldPath}`;
     const encoded = new TextEncoder().encode(aadStr);
