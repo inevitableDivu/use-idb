@@ -42,5 +42,8 @@ describe("Collision-safe IndexedDB key identity", () => {
     expect(toKeyString(["a,b", "c"])).not.toBe(toKeyString(["a", "b,c"]));
     expect(toKeyString(new Uint8Array([1, 2]))).not.toBe(toKeyString(new Uint16Array(new Uint8Array([1, 2]).buffer)));
     expect(toKeyString(new Date("2026-01-01T00:00:00.000Z"))).not.toBe(toKeyString("2026-01-01T00:00:00.000Z"));
+    expect(toKeyString(-0)).toBe(toKeyString(0));
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    expect(toKeyString(bytes.buffer)).toBe(toKeyString(new Uint16Array(bytes.buffer)));
   });
 });
