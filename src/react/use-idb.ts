@@ -124,14 +124,18 @@ export function useIdb<T>(key: string, options?: UseIdbOptions<T>): UseIdbReturn
 
   const fetchRecord = useCallback(() => {
     if (entry.status === "idle") {
-      engine.l1Cache.markPending(entry, [storeName]);
+      const requestId = engine.l1Cache.markPending(entry, [storeName]);
       engine
         .get(storeName, key)
         .then((val) => {
-          engine.l1Cache.resolve(entry, val as T | undefined);
+          engine.l1Cache.resolve(entry, val as T | undefined, requestId);
         })
         .catch((err) => {
-          engine.l1Cache.reject(entry, err instanceof Error ? err : new Error(String(err)));
+          engine.l1Cache.reject(
+            entry,
+            err instanceof Error ? err : new Error(String(err)),
+            requestId,
+          );
         });
     }
   }, [engine, entry, storeName, key]);
@@ -170,7 +174,14 @@ export function useIdb<T>(key: string, options?: UseIdbOptions<T>): UseIdbReturn
 
   const setValue = useCallback(
     async (updater: T | ((prev: T | undefined) => T)) => {
-      const currentVal = snapshot.data !== undefined ? snapshot.data : options?.defaultValue;
+      const currentVal =
+        snapshot.data !== undefined
+          ? snapshot.data
+          : options?.defaultValue !== undefined
+            ? options.defaultValue
+            : isFunctionUpdater(updater)
+              ? await engine.get(storeName, key) as T | undefined
+              : undefined;
       const nextVal = isFunctionUpdater(updater) ? updater(currentVal) : updater;
       await engine.put(storeName, nextVal, key, {
         optimistic: options?.optimistic ?? true,
