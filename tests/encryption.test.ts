@@ -4,6 +4,7 @@ import {
   createEncryptionMiddleware,
   CryptographicContextUnavailableError,
   MemoryStorageAdapter,
+  defaultSerializer,
   store,
 } from "../src";
 
@@ -183,6 +184,55 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
       value: binaryRecord,
     })) as { secret: string };
     expect(binaryRead.secret).toBe("binary-key");
+  });
+
+  it("continues decrypting legacy envelopes that use the old AAD key encoding", async () => {
+    const key = await generateAesKey();
+    const middleware = createEncryptionMiddleware(key, ["secret"]);
+
+    async function legacyEnvelope(value: string, aadKey: string) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const serialized = defaultSerializer.encode(value);
+      const plaintext = new Uint8Array(serialized.byteLength);
+      plaintext.set(serialized);
+      const aad = new TextEncoder().encode(`v1:records:${aadKey}:secret`);
+      const ciphertext = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv, additionalData: aad },
+        key,
+        plaintext,
+      );
+      const base64 = (bytes: Uint8Array) =>
+        btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
+
+      return {
+        __encrypted: true as const,
+        v: 1 as const,
+        keyId: "default",
+        iv: base64(iv),
+        ciphertext: base64(new Uint8Array(ciphertext)),
+      };
+    }
+
+    // Older key-bound record: key serialization was simply String(key).
+    const keyBoundLegacy = await legacyEnvelope("legacy-key-bound", "1");
+    await expect(
+      middleware.afterRead?.({
+        storeName: "records",
+        key: 1,
+        value: { secret: keyBoundLegacy },
+      }),
+    ).resolves.toEqual({ secret: "legacy-key-bound" });
+
+    // Older keyless write: legacy AAD used "*" and is still readable even if
+    // the adapter now knows the actual generated key at read time.
+    const keylessLegacy = await legacyEnvelope("legacy-keyless", "*");
+    await expect(
+      middleware.afterRead?.({
+        storeName: "records",
+        key: 99,
+        value: { secret: keylessLegacy },
+      }),
+    ).resolves.toEqual({ secret: "legacy-keyless" });
   });
 
   it("rejects ciphertext transposition across stores or keys via context-bound AAD", async () => {
