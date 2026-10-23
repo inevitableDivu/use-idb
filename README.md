@@ -96,8 +96,7 @@ export const db = createDatabase({
   },
 });
 
-export const { useLiveQuery, useMutation, useRecord, useIDBStatus } =
-  createDatabaseHooks(db);
+export const { useLiveQuery, useMutation, useRecord, useIDBStatus } = createDatabaseHooks(db);
 ```
 
 The <code>name</code> identifies this database in the browser, and <code>version</code> controls schema upgrades. Store definitions are persistent schema: changing the primary key configuration of an existing store requires a migration (see [Schema migrations](#schema-migrations)).
@@ -117,12 +116,7 @@ export function TodoList() {
     refetch,
   } = useLiveQuery(
     (database) =>
-      database
-        .query("todos")
-        .where("by_done")
-        .equals(false)
-        .orderBy("createdAt", "desc")
-        .toArray(),
+      database.query("todos").where("by_done").equals(false).orderBy("createdAt", "desc").toArray(),
     [],
   );
 
@@ -142,10 +136,7 @@ export function TodoList() {
 
   return (
     <section>
-      <button
-        disabled={isPending}
-        onClick={() => void addTodo().catch(console.error)}
-      >
+      <button disabled={isPending} onClick={() => void addTodo().catch(console.error)}>
         Add todo
       </button>
       <button onClick={() => void refetch()}>Refresh</button>
@@ -159,9 +150,7 @@ export function TodoList() {
               {todo.title}
               <button
                 disabled={isPending}
-                onClick={() =>
-                  void deleteRecord(todo.id).catch(console.error)
-                }
+                onClick={() => void deleteRecord(todo.id).catch(console.error)}
               >
                 Delete
               </button>
@@ -184,8 +173,12 @@ For a single preference or other small key-value use case, you can use <code>use
 import { useIdb } from "@inevitable_divu/use-idb";
 
 export function ThemeToggle() {
-  const { value: theme = "light", setValue, loading, error } =
-    useIdb<"light" | "dark">("app-theme", { defaultValue: "light" });
+  const {
+    value: theme = "light",
+    setValue,
+    loading,
+    error,
+  } = useIdb<"light" | "dark">("app-theme", { defaultValue: "light" });
 
   if (error) return <p role="alert">{error.message}</p>;
 
@@ -193,9 +186,7 @@ export function ThemeToggle() {
     <button
       disabled={loading}
       onClick={() =>
-        void setValue((current) =>
-          current === "dark" ? "light" : "dark",
-        ).catch(console.error)
+        void setValue((current) => (current === "dark" ? "light" : "dark")).catch(console.error)
       }
     >
       Theme: {theme}
@@ -204,7 +195,7 @@ export function ThemeToggle() {
 }
 ```
 
-By default, <code>useIdb</code> uses the shared database named <code>__use_idb_default__</code> and the <code>keyval</code> object store. You can specify another <code>storeName</code>. Its result contains <code>value</code>, <code>setValue</code>, <code>remove</code>, <code>loading</code>, and <code>error</code>.
+By default, <code>useIdb</code> uses the shared database named <code>**use_idb_default**</code> and the <code>keyval</code> object store. You can specify another <code>storeName</code>. Its result contains <code>value</code>, <code>setValue</code>, <code>remove</code>, <code>loading</code>, and <code>error</code>.
 
 Use the schema-based API for applications with multiple entities, indexes, typed queries, migrations, or more explicit storage configuration.
 
@@ -358,7 +349,12 @@ const taggedAdmins = await db
   .toArray();
 
 // Sort, paginate, and count.
-const firstPage = await db.query("users").orderBy("createdAt", "desc").offset(0).limit(20).toArray();
+const firstPage = await db
+  .query("users")
+  .orderBy("createdAt", "desc")
+  .offset(0)
+  .limit(20)
+  .toArray();
 const totalAdmins = await db.query("users").where("by_role").equals("admin").count();
 const firstAdmin = await db.query("users").where("by_role").equals("admin").first();
 
@@ -497,16 +493,16 @@ const db = createDatabase({
 
 All groups are optional. Important settings:
 
-| Option | Purpose |
-| --- | --- |
-| <code>adapters</code> | Supply custom <code>storage</code>, <code>sync</code>, or <code>lock</code> adapters. |
-| <code>middleware</code> | Ordered middleware such as serialization or field encryption. |
+| Option                                                  | Purpose                                                                                                                                  |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| <code>adapters</code>                                   | Supply custom <code>storage</code>, <code>sync</code>, or <code>lock</code> adapters.                                                    |
+| <code>middleware</code>                                 | Ordered middleware such as serialization or field encryption.                                                                            |
 | <code>cache.maxEntries</code>, <code>cache.ttlMs</code> | Cache capacity and time-to-live. Defaults: 1,000 entries and 60,000 ms. Active subscriptions can keep the cache above the soft capacity. |
-| <code>writes.coalesceWindowMs</code> | Write coalescing window in milliseconds. Defaults to <code>0</code>, which coalesces writes queued in the same microtask. |
-| <code>crossTab.enabled</code> | Enable cross-tab invalidation; enabled by default. |
-| <code>fallback.strategy</code> | <code>"memory"</code> to allow volatile in-memory fallback, or <code>"error"</code> to fail if IndexedDB cannot be used. |
-| <code>fallback.requestPersistentStorage</code> | Ask the browser for persistent storage on a best-effort basis; the browser decides whether to grant it. |
-| <code>diagnostics</code> | Optional event/error callbacks. Exceptions thrown by diagnostics callbacks do not change storage outcomes. |
+| <code>writes.coalesceWindowMs</code>                    | Write coalescing window in milliseconds. Defaults to <code>0</code>, which coalesces writes queued in the same microtask.                |
+| <code>crossTab.enabled</code>                           | Enable cross-tab invalidation; enabled by default.                                                                                       |
+| <code>fallback.strategy</code>                          | <code>"memory"</code> to allow volatile in-memory fallback, or <code>"error"</code> to fail if IndexedDB cannot be used.                 |
+| <code>fallback.requestPersistentStorage</code>          | Ask the browser for persistent storage on a best-effort basis; the browser decides whether to grant it.                                  |
+| <code>diagnostics</code>                                | Optional event/error callbacks. Exceptions thrown by diagnostics callbacks do not change storage outcomes.                               |
 
 The backward-compatible form <code>createDatabase(schema, { middlewares: [...] })</code> is also supported. In the grouped runtime API the option is named <code>middleware</code> (singular).
 
@@ -566,11 +562,7 @@ Key rules:
 <code>createEncryptionMiddleware</code> can encrypt selected fields with AES-GCM through the browser's Web Crypto API. It supports key rings so older ciphertext can be read while new writes use a new primary key.
 
 ```ts
-import {
-  createDatabase,
-  createEncryptionMiddleware,
-  store,
-} from "@inevitable_divu/use-idb";
+import { createDatabase, createEncryptionMiddleware, store } from "@inevitable_divu/use-idb";
 
 interface PrivateNote {
   id: string;
@@ -588,9 +580,7 @@ export function createPrivateNotesDatabase(encryptionKey: CryptoKey) {
       },
     },
     {
-      middlewares: [
-        createEncryptionMiddleware(encryptionKey, ["secret"]),
-      ],
+      middlewares: [createEncryptionMiddleware(encryptionKey, ["secret"])],
     },
   );
 }
@@ -632,34 +622,34 @@ IndexedDB is a browser API. During server rendering, hooks use server-safe snaps
 
 ## Troubleshooting
 
-| Symptom | What to check |
-| --- | --- |
-| Data seems to disappear after reload | Check whether the engine fell back to memory, whether the browser cleared storage, and whether the database name/version changed. |
-| An upgrade is blocked | Close other tabs running an older connection, then reload as needed. Inspect <code>isUpgradeBlocked</code> and <code>requiresReloadForUpgrade</code>. |
-| A query does not rerun when captured state changes | Include relevant values in the <code>deps</code> array and use <code>queryKey</code> when distinct query identities need to be represented. |
-| A live-query callback seems to run more than once | This is part of dependency discovery and fetching. Keep the callback pure and move side effects outside it. |
-| Writes fail with middleware enabled | Use CRUD/batch APIs. Explicit transactions and <code>db.update()</code> cannot run with middleware. |
-| TypeScript rejects a field or key | Define stores with <code>store&lt;T&gt;()({...})</code> or <code>outOfLineStore&lt;TItem, TKey&gt;()({...})</code> and query declared fields/indexes. |
-| React UI does not reflect a custom async query | Declare affected stores in <code>options.stores</code> and provide a stable <code>queryKey</code> when needed. Use the abort signal for cancellable work. |
+| Symptom                                            | What to check                                                                                                                                             |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Data seems to disappear after reload               | Check whether the engine fell back to memory, whether the browser cleared storage, and whether the database name/version changed.                         |
+| An upgrade is blocked                              | Close other tabs running an older connection, then reload as needed. Inspect <code>isUpgradeBlocked</code> and <code>requiresReloadForUpgrade</code>.     |
+| A query does not rerun when captured state changes | Include relevant values in the <code>deps</code> array and use <code>queryKey</code> when distinct query identities need to be represented.               |
+| A live-query callback seems to run more than once  | This is part of dependency discovery and fetching. Keep the callback pure and move side effects outside it.                                               |
+| Writes fail with middleware enabled                | Use CRUD/batch APIs. Explicit transactions and <code>db.update()</code> cannot run with middleware.                                                       |
+| TypeScript rejects a field or key                  | Define stores with <code>store&lt;T&gt;()({...})</code> or <code>outOfLineStore&lt;TItem, TKey&gt;()({...})</code> and query declared fields/indexes.     |
+| React UI does not reflect a custom async query     | Declare affected stores in <code>options.stores</code> and provide a stable <code>queryKey</code> when needed. Use the abort signal for cancellable work. |
 
 ## API overview
 
-| API | Purpose |
-| --- | --- |
-| <code>createDatabase(schema)</code> | Create or retrieve an engine for a typed database schema. |
-| <code>store&lt;T&gt;()({...})</code> | Define a typed store with an inline primary key. |
-| <code>outOfLineStore&lt;TItem, TKey&gt;()({...})</code> | Define a typed store whose primary key is passed separately. |
-| <code>createDatabaseHooks(db)</code> | Create schema-bound React hooks. |
-| <code>useIdb(key, options?)</code> | Simple reactive key-value hook backed by the default database. |
-| <code>useRecord(store, key, options?)</code> | Subscribe to one record and set, patch, or remove it. |
-| <code>useLiveQuery(queryFn, deps, options?)</code> | Subscribe to query results. |
-| <code>useMutation(store)</code> | Perform store-scoped writes, batch writes, deletes, and clears. |
-| <code>useIDBStatus()</code> | Read connection, fallback, upgrade, and storage quota status. |
-| <code>db.get/put/delete/clear(...)</code> | Core CRUD operations. |
-| <code>db.query(store)</code> | Build a typed IndexedDB query. |
-| <code>db.transaction(stores, mode, callback)</code> | Run explicit atomic transaction work (without middleware). |
-| <code>createEncryptionMiddleware(key, fields)</code> | Encrypt selected fields through Web Crypto. |
-| <code>IndexedDBProvider</code> / <code>useDatabase</code> | Provide or access an engine through React context. |
+| API                                                       | Purpose                                                         |
+| --------------------------------------------------------- | --------------------------------------------------------------- |
+| <code>createDatabase(schema)</code>                       | Create or retrieve an engine for a typed database schema.       |
+| <code>store&lt;T&gt;()({...})</code>                      | Define a typed store with an inline primary key.                |
+| <code>outOfLineStore&lt;TItem, TKey&gt;()({...})</code>   | Define a typed store whose primary key is passed separately.    |
+| <code>createDatabaseHooks(db)</code>                      | Create schema-bound React hooks.                                |
+| <code>useIdb(key, options?)</code>                        | Simple reactive key-value hook backed by the default database.  |
+| <code>useRecord(store, key, options?)</code>              | Subscribe to one record and set, patch, or remove it.           |
+| <code>useLiveQuery(queryFn, deps, options?)</code>        | Subscribe to query results.                                     |
+| <code>useMutation(store)</code>                           | Perform store-scoped writes, batch writes, deletes, and clears. |
+| <code>useIDBStatus()</code>                               | Read connection, fallback, upgrade, and storage quota status.   |
+| <code>db.get/put/delete/clear(...)</code>                 | Core CRUD operations.                                           |
+| <code>db.query(store)</code>                              | Build a typed IndexedDB query.                                  |
+| <code>db.transaction(stores, mode, callback)</code>       | Run explicit atomic transaction work (without middleware).      |
+| <code>createEncryptionMiddleware(key, fields)</code>      | Encrypt selected fields through Web Crypto.                     |
+| <code>IndexedDBProvider</code> / <code>useDatabase</code> | Provide or access an engine through React context.              |
 
 Imports are available from <code>@inevitable_divu/use-idb</code>; React-only APIs are also available from <code>@inevitable_divu/use-idb/react</code>, and core engine APIs from <code>@inevitable_divu/use-idb/core</code>.
 
