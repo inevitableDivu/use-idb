@@ -57,7 +57,11 @@ export function toKeyString(key: unknown): string {
     if (value instanceof Date) return ["date", value.getTime()];
     if (value instanceof ArrayBuffer) return ["binary", Array.from(new Uint8Array(value))];
     if (ArrayBuffer.isView(value)) {
-      return ["binary", Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))];
+      return [
+        "binary-view",
+        value.constructor.name,
+        Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)),
+      ];
     }
     if (Array.isArray(value)) return ["array", value.map(encode)];
     if (typeof value === "object") {
