@@ -2,6 +2,9 @@
  * Mutation envelope broadcast across tabs to notify listeners of committed database changes.
  */
 export interface MutationEnvelope {
+  /** Wire format version; readers tolerate unversioned legacy envelopes during rolling upgrades. */
+  version: 1;
+
   /**
    * Unique tab/client identifier originating the mutation.
    */
@@ -20,10 +23,10 @@ export interface MutationEnvelope {
   /**
    * Type of mutation applied.
    */
-  operation: "put" | "delete" | "clear" | "bulk" | "force_release";
+  operation: "put" | "delete" | "clear" | "bulk" | "invalidate" | "force_release";
 
   /**
-   * Array of primary keys affected by the mutation (empty for "clear" or "force_release").
+   * Array of primary keys affected by the mutation (empty for "clear", "invalidate", or "force_release").
    */
   affectedKeys: IDBValidKey[];
 }

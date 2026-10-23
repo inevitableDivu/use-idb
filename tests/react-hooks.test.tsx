@@ -1,5 +1,5 @@
 import { renderHook, act, waitFor, render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import React, { Suspense } from "react";
 import {
   useIdb,
@@ -303,6 +303,44 @@ describe("React Hooks", () => {
       await waitFor(() => {
         expect(result.current.data).toBe(1);
       });
+    });
+
+    it("uses declared stores to avoid speculative execution and aborts custom async work on unmount", async () => {
+      const db = createDatabase({
+        name: "test-livequery-cancellation-db",
+        version: 1,
+        stores: { tasks: store<{ id: string }>()({ keyPath: "id" }) },
+      });
+
+      const signals: AbortSignal[] = [];
+      const query = vi.fn((_engine: unknown, context: { signal: AbortSignal }) => {
+        signals.push(context.signal);
+        return new Promise<number>((_resolve, reject) => {
+          context.signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      });
+
+      const { unmount } = renderHook(() =>
+        useLiveQuery<number>(
+          query,
+          [],
+          { stores: ["tasks"], queryKey: "cancellable-custom-query" },
+          db,
+        ),
+      );
+
+      await waitFor(() => expect(query).toHaveBeenCalled());
+      // A declared store list avoids invoking arbitrary async work during dependency inspection.
+      expect(query.mock.calls.length).toBeLessThanOrEqual(2);
+      expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
+
+      unmount();
+      await waitFor(() => expect(signals.every((signal) => signal.aborted)).toBe(true));
+      await db.destroy();
     });
   });
 

@@ -4,7 +4,8 @@ import { Engine } from "../core/engine";
 import { QueryBuilder } from "../core/query-engine";
 import { hashQuery } from "../core/key-serializer";
 import type { StoreConfig } from "../types/schema";
-import type { LiveQueryOptions } from "../types/query";
+import type { LiveQueryOptions, QueryExecutionContext } from "../types/query";
+import { hashDependencies } from "./query-dependencies";
 import type { QuerySnapshot } from "../core/l1-cache";
 
 /**
@@ -49,14 +50,14 @@ export interface UseLiveQueryResult<T> {
  * Adheres to React 19 Concurrent Mode and synchronous Suspense contracts.
  *
  * @template T - The resolved query return type.
- * @param queryFn - Function that returns a {@link QueryBuilder} or Promise of data.
+ * @param queryFn - Pure query description or async work. It can run more than once during dependency discovery and execution; use the optional signal to cancel custom async work.
  * @param deps - Dependency array. Changes to dependencies trigger a query re-execution.
  * @param options - Configuration options (`initialData`, `suspense`, `enabled`, `queryKey`).
  * @param customEngine - Optional engine instance override.
  * @returns Object with `data`, `isLoading`, `isFetching`, `error`, and `refetch`.
  */
 export function useLiveQuery<T>(
-  queryFn: (db: Engine) => QueryBuilder<any, any, any> | Promise<T>,
+  queryFn: (db: Engine, context: QueryExecutionContext) => QueryBuilder<any, any, any> | Promise<T>,
   deps: unknown[] = [],
   options?: LiveQueryOptions<T>,
   customEngine?: Engine,
@@ -68,16 +69,26 @@ export function useLiveQuery<T>(
   const queryFnRef = useRef(queryFn);
   queryFnRef.current = queryFn;
 
-  const depsHash = useMemo(() => {
-    try {
-      return JSON.stringify(deps);
-    } catch {
-      return String(deps.length);
-    }
-  }, [deps]);
+  const depsHash = useMemo(() => hashDependencies(deps), [deps]);
+  const activeControllerRef = useRef<AbortController | null>(null);
 
-  // Inspect QueryBuilder metadata once per dependency change
+  // Explicit store dependencies are the preferred path for arbitrary async/custom queries.
+  // They avoid invoking the callback speculatively just to discover dependencies.
   const { queryAst, storeNames } = useMemo(() => {
+    if (options?.stores) {
+      const names = [...new Set(options.stores)];
+      if (names.length === 0) {
+        throw new TypeError("useLiveQuery options.stores must contain at least one object store.");
+      }
+      for (const name of names) {
+        if (!(name in engine.schema.stores)) {
+          throw new TypeError(`useLiveQuery declared unknown object store "${name}".`);
+        }
+      }
+      return { queryAst: undefined, storeNames: names };
+    }
+
+    // Otherwise inspect QueryBuilder metadata once per dependency change.
     try {
       const queryBuilders: QueryBuilder<any, any, any>[] = [];
       const metadataStorage = new Proxy(engine.storage, {
@@ -107,7 +118,7 @@ export function useLiveQuery<T>(
           return Reflect.get(target, property, receiver);
         },
       });
-      const result = queryFnRef.current(trackedEngine);
+      const result = queryFnRef.current(trackedEngine, { signal: new AbortController().signal });
       const builder = result instanceof QueryBuilder ? result : queryBuilders[0];
       if (builder) {
         const names = [...new Set(queryBuilders.map((queryBuilder) => queryBuilder.getAST().storeName))];
@@ -124,7 +135,7 @@ export function useLiveQuery<T>(
     }
     return { queryAst: undefined, storeNames: ["default"] };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, depsHash]);
+  }, [engine, depsHash, options?.stores]);
 
   const queryHash = useMemo(() => {
     if (queryAst) {
@@ -146,13 +157,20 @@ export function useLiveQuery<T>(
 
   const executeFetch = useCallback((): Promise<T> => {
     if (!enabled) return Promise.resolve(undefined as unknown as T);
+
+    const controller = new AbortController();
+    const previousController = activeControllerRef.current;
+    activeControllerRef.current = controller;
+    previousController?.abort();
+
     const requestId = engine.l1Cache.markPending(entry, storeNames);
 
     const promise = (async () => {
       try {
-        const result = queryFnRef.current(engine);
+        const result = queryFnRef.current(engine, { signal: controller.signal });
         let data: T;
         if (result instanceof QueryBuilder) {
+          result.withSignal(controller.signal);
           const ast = result.getAST();
           if (ast.isCount) {
             data = (await result.count()) as unknown as T;
@@ -163,12 +181,26 @@ export function useLiveQuery<T>(
           data = await result;
         }
 
+        if (controller.signal.aborted) {
+          throw new DOMException("The query was aborted.", "AbortError");
+        }
         engine.l1Cache.resolve(entry, data, requestId);
         return data;
       } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        engine.l1Cache.reject(entry, error, requestId);
-        throw error;
+        const aborted =
+          controller.signal.aborted ||
+          (err instanceof Error && err.name === "AbortError");
+        if (aborted) {
+          engine.l1Cache.cancel(entry, requestId);
+        } else {
+          const error = err instanceof Error ? err : new Error(String(err));
+          engine.l1Cache.reject(entry, error, requestId);
+        }
+        throw err;
+      } finally {
+        if (activeControllerRef.current === controller) {
+          activeControllerRef.current = null;
+        }
       }
     })();
 
@@ -181,6 +213,17 @@ export function useLiveQuery<T>(
       executeFetch().catch(() => {});
     }
   }, [entry.status, enabled, executeFetch]);
+
+  // Abort this hook's active operation when it unmounts or changes to a different query key.
+  // Cache request IDs ensure an obsolete cancellation cannot overwrite newer query results.
+  useEffect(
+    () => () => {
+      const controller = activeControllerRef.current;
+      activeControllerRef.current = null;
+      controller?.abort();
+    },
+    [engine, queryHash],
+  );
 
   const subscribe = useCallback(
     (onStoreChange: () => void) => {

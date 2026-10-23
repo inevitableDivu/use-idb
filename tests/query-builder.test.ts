@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf } from "vitest";
-import { createDatabase, store } from "../src";
+import { createDatabase, outOfLineStore, store } from "../src";
 
 interface Product {
   id: string;
@@ -231,4 +231,104 @@ describe("QueryBuilder", () => {
       await db.query("memberships").where("by_org_member").equals(["org-1", 7]).toArray(),
     ).toHaveLength(1);
   });
+
+  it("does not reuse a key range when composing predicates across different indexes", async () => {
+    const db = createDatabase({
+      name: "query-multi-index-range-reset-db",
+      version: 1,
+      stores: {
+        users: store<{
+          id: string;
+          role: "admin" | "user";
+          age: number;
+        }>()({
+          keyPath: "id",
+          indexes: {
+            by_role: "role",
+            by_age: "age",
+          },
+        }),
+      },
+    });
+
+    await db.put("users", { id: "a", role: "admin", age: 20 });
+    await db.put("users", { id: "b", role: "admin", age: 40 });
+    await db.put("users", { id: "c", role: "user", age: 20 });
+
+    const matches = await db
+      .query("users")
+      .where("by_role")
+      .equals("admin")
+      .and("by_age")
+      .equals(20)
+      .toArray();
+
+    expect(matches.map((user) => user.id)).toEqual(["a"]);
+    await db.destroy();
+  });
+
+
+  it("supports typed out-of-line primary keys", async () => {
+    interface AuditEvent {
+      type: "created" | "updated";
+      occurredAt: Date;
+    }
+
+    const db = createDatabase({
+      name: "typed-out-of-line-key-db",
+      version: 1,
+      stores: {
+        events: outOfLineStore<AuditEvent, string>()({
+          indexes: {
+            by_type: "type",
+          },
+        }),
+      },
+    });
+
+    expectTypeOf(db.get("events", "event-1")).toEqualTypeOf<Promise<AuditEvent | undefined>>();
+    // @ts-expect-error The out-of-line primary key is declared as a string.
+    db.get("events", 1);
+    // @ts-expect-error Stored values must match the declared event shape.
+    db.put("events", { type: "deleted", occurredAt: new Date() }, "event-2");
+
+    await db.put("events", { type: "created", occurredAt: new Date("2026-10-23T00:00:00.000Z") }, "event-1");
+    expect(await db.get("events", "event-1")).toMatchObject({ type: "created" });
+    expect(await db.query("events").where("by_type").equals("created").count()).toBe(1);
+    await db.destroy();
+  });
+
+  it("explains the selected index path and JavaScript post-processing", async () => {
+    const db = createDatabase({
+      name: "query-explain-plan-db",
+      version: 1,
+      stores: {
+        users: store<User>()({
+          keyPath: "id",
+          indexes: { by_email: "email" },
+        }),
+      },
+    });
+
+    const plan = db
+      .query("users")
+      .where("by_email")
+      .equals("alice@example.test")
+      .orderBy("createdAt", "desc")
+      .limit(10)
+      .explain();
+
+    expect(plan).toMatchObject({
+      storeName: "users",
+      accessPath: "index",
+      indexName: "by_email",
+      usesKeyRange: true,
+      requiresPostSort: true,
+      sortField: "createdAt",
+      sortDirection: "desc",
+      pagination: "materialize-and-slice",
+    });
+    await db.destroy();
+  });
+
 });

@@ -253,6 +253,7 @@ export function createEncryptionMiddleware(
 
   return {
     name: "encryption",
+    transformedFieldPaths: Object.freeze([...new Set(fieldPaths)]),
 
     async beforeWrite(ctx) {
       if (!hasCrypto) {

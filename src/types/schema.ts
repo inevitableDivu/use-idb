@@ -118,6 +118,36 @@ export interface StoreDefinition<
   };
 }
 
+/**
+ * Configuration for a store whose primary key is supplied separately to put/get/delete.
+ * Use this helper when a record does not contain an inline primary key.
+ */
+export interface OutOfLineStoreInput<
+  TItem extends object,
+  TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+> {
+  readonly autoIncrement?: boolean;
+  readonly indexes?: TIndexes;
+}
+
+/**
+ * Type-preserving out-of-line store definition. The key type can be declared explicitly
+ * because IndexedDB cannot infer an out-of-line key type from a record property.
+ */
+export interface OutOfLineStoreDefinition<
+  TItem extends object = object,
+  TKey extends IDBValidKey = IDBValidKey,
+  TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+> extends StoreConfig<TItem, TKey> {
+  readonly indexes: Record<string, IndexConfig<TItem>>;
+  readonly $types: {
+    readonly item: TItem;
+    readonly key: TKey;
+    readonly keyPath: undefined;
+    readonly indexes: TIndexes;
+  };
+}
+
 type RuntimeKeyPath = string | readonly string[];
 type RuntimeIndexConfig = {
   keyPath: RuntimeKeyPath;
@@ -195,6 +225,80 @@ export function store(config?: unknown): unknown {
     return (deferred: unknown) => normalizeStore(deferred);
   }
   return normalizeStore(config);
+}
+
+function normalizeOutOfLineStore(config: unknown): unknown {
+  const input = config === undefined ? {} : config;
+  if (!isRecord(input)) {
+    throw new TypeError("An out-of-line store configuration must be an object.");
+  }
+  if (input.keyPath !== undefined) {
+    throw new TypeError("Out-of-line stores cannot declare keyPath; use store<T>() for inline keys.");
+  }
+  if (input.autoIncrement !== undefined && typeof input.autoIncrement !== "boolean") {
+    throw new TypeError("Store autoIncrement must be a boolean.");
+  }
+
+  const indexes: Record<string, RuntimeIndexConfig> = {};
+  if (input.indexes !== undefined) {
+    if (!isRecord(input.indexes)) throw new TypeError("Store indexes must be an object map.");
+    for (const [name, indexInput] of Object.entries(input.indexes)) {
+      if (isRuntimeKeyPath(indexInput)) {
+        indexes[name] = { keyPath: indexInput };
+        continue;
+      }
+      if (!isRecord(indexInput) || !isRuntimeKeyPath(indexInput.keyPath)) {
+        throw new TypeError(`Index "${name}" requires a valid keyPath.`);
+      }
+      if (
+        (indexInput.unique !== undefined && typeof indexInput.unique !== "boolean") ||
+        (indexInput.multiEntry !== undefined && typeof indexInput.multiEntry !== "boolean")
+      ) {
+        throw new TypeError(`Index "${name}" options must be booleans.`);
+      }
+      if (indexInput.multiEntry === true && Array.isArray(indexInput.keyPath)) {
+        throw new TypeError(`Index "${name}" cannot combine multiEntry with a compound keyPath.`);
+      }
+      indexes[name] = {
+        keyPath: indexInput.keyPath,
+        unique: indexInput.unique as boolean | undefined,
+        multiEntry: indexInput.multiEntry as boolean | undefined,
+      };
+    }
+  }
+  return {
+    autoIncrement: input.autoIncrement === true,
+    indexes,
+  };
+}
+
+/**
+ * Defines a typed store whose keys are stored out-of-line.
+ *
+ * ```ts
+ * const events = outOfLineStore<Event, string>()({ indexes: { by_kind: "kind" } });
+ * ```
+ */
+export function outOfLineStore<
+  TItem extends object,
+  TKey extends IDBValidKey = IDBValidKey,
+>(): <
+  const TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+>(
+  config?: OutOfLineStoreInput<TItem, TIndexes>,
+) => OutOfLineStoreDefinition<TItem, TKey, TIndexes>;
+export function outOfLineStore<
+  TItem extends object,
+  TKey extends IDBValidKey = IDBValidKey,
+  const TIndexes extends IndexesInputMap<TItem> = Record<never, never>,
+>(
+  config?: OutOfLineStoreInput<TItem, TIndexes>,
+): OutOfLineStoreDefinition<TItem, TKey, TIndexes>;
+export function outOfLineStore(config?: unknown): unknown {
+  if (config === undefined) {
+    return (deferred: unknown) => normalizeOutOfLineStore(deferred);
+  }
+  return normalizeOutOfLineStore(config);
 }
 
 /**
@@ -303,6 +407,93 @@ export interface DatabaseSchema<
    * Runtime engine tuning options.
    */
   options?: DatabaseOptions;
+}
+
+
+/**
+ * Validate database configuration before touching browser storage. This keeps configuration
+ * mistakes deterministic and prevents them from being mistaken for IndexedDB availability errors.
+ */
+export function validateDatabaseSchema(schema: DatabaseSchema): void {
+  if (!isRecord(schema)) throw new TypeError("Database schema must be an object.");
+  if (typeof schema.name !== "string" || schema.name.trim().length === 0) {
+    throw new TypeError("Database name must be a non-empty string.");
+  }
+  if (!Number.isSafeInteger(schema.version) || schema.version < 1) {
+    throw new RangeError("Database version must be a positive safe integer.");
+  }
+  if (!isRecord(schema.stores)) throw new TypeError("Database stores must be an object map.");
+
+  for (const [storeName, config] of Object.entries(schema.stores)) {
+    if (!storeName || !isRecord(config)) {
+      throw new TypeError("Each object store must have a non-empty name and an object configuration.");
+    }
+    if (config.keyPath !== undefined && !isRuntimeKeyPath(config.keyPath)) {
+      throw new TypeError(`Store "${storeName}" has an invalid keyPath.`);
+    }
+    if (config.autoIncrement !== undefined && typeof config.autoIncrement !== "boolean") {
+      throw new TypeError(`Store "${storeName}" autoIncrement must be a boolean.`);
+    }
+    if (config.autoIncrement === true && (Array.isArray(config.keyPath) || config.keyPath === "")) {
+      throw new TypeError(`Store "${storeName}" cannot use autoIncrement with an empty or compound keyPath.`);
+    }
+    if (config.indexes !== undefined && !isRecord(config.indexes)) {
+      throw new TypeError(`Store "${storeName}" indexes must be an object map.`);
+    }
+    for (const [indexName, index] of Object.entries(config.indexes ?? {})) {
+      if (!indexName || !isRecord(index) || !isRuntimeKeyPath(index.keyPath)) {
+        throw new TypeError(`Index "${storeName}.${indexName}" has an invalid keyPath.`);
+      }
+      if (
+        (index.unique !== undefined && typeof index.unique !== "boolean") ||
+        (index.multiEntry !== undefined && typeof index.multiEntry !== "boolean")
+      ) {
+        throw new TypeError(`Index "${storeName}.${indexName}" options must be booleans.`);
+      }
+      if (index.multiEntry === true && Array.isArray(index.keyPath)) {
+        throw new TypeError(`Index "${storeName}.${indexName}" cannot combine multiEntry with a compound keyPath.`);
+      }
+    }
+  }
+
+  if (schema.migrations !== undefined) {
+    if (!isRecord(schema.migrations)) {
+      throw new TypeError("Migrations must be an object keyed by schema version.");
+    }
+    for (const [version, migrate] of Object.entries(schema.migrations)) {
+      const targetVersion = Number(version);
+      if (!Number.isSafeInteger(targetVersion) || targetVersion < 1 || targetVersion > schema.version) {
+        throw new RangeError(`Migration version "${version}" must be between 1 and the database version.`);
+      }
+      if (typeof migrate !== "function") throw new TypeError(`Migration v${version} must be a function.`);
+    }
+  }
+
+  const options = schema.options;
+  if (!options) return;
+  if (
+    options.coalesceWindowMs !== undefined &&
+    (!Number.isSafeInteger(options.coalesceWindowMs) || options.coalesceWindowMs < 0)
+  ) {
+    throw new RangeError("coalesceWindowMs must be a non-negative safe integer.");
+  }
+  if (
+    options.cacheMaxEntries !== undefined &&
+    (!Number.isSafeInteger(options.cacheMaxEntries) || options.cacheMaxEntries < 1)
+  ) {
+    throw new RangeError("cacheMaxEntries must be a positive safe integer.");
+  }
+  if (
+    options.cacheTTLMs !== undefined &&
+    (!Number.isSafeInteger(options.cacheTTLMs) || options.cacheTTLMs < 0)
+  ) {
+    throw new RangeError("cacheTTLMs must be a non-negative safe integer.");
+  }
+  for (const option of ["enableCrossTabSync", "fallbackToMemory", "requestPersistentStorage"] as const) {
+    if (options[option] !== undefined && typeof options[option] !== "boolean") {
+      throw new TypeError(`${option} must be a boolean.`);
+    }
+  }
 }
 
 export type StoreMap = Record<string, StoreConfig<any, any>>;

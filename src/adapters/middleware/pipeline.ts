@@ -11,7 +11,12 @@ export class MiddlewarePipeline {
   private readonly middlewares: IDBMiddleware[];
 
   constructor(middlewares: IDBMiddleware[]) {
-    this.middlewares = middlewares;
+    this.middlewares = [...middlewares];
+  }
+
+  /** True when reads or writes require transformations that cannot safely run inside an IDB transaction. */
+  get hasMiddleware(): boolean {
+    return this.middlewares.length > 0;
   }
 
   async runBeforeWrite(

@@ -61,6 +61,17 @@ export interface IStorageTransaction {
  */
 export interface IStoragePort {
   /**
+   * Optional adapter capability marker. Consumers should prefer this contract over concrete
+   * adapter instanceof checks. Existing third-party adapters may omit it and are treated as custom.
+   */
+  readonly kind?: "indexeddb" | "memory" | "custom";
+
+  /**
+   * Request non-evictable origin storage when the runtime supports it. Missing means unsupported.
+   */
+  requestPersistentStorage?(): Promise<boolean>;
+
+  /**
    * Opens and initializes the underlying storage engine, running any necessary schema migrations.
    */
   open(): Promise<void>;
@@ -149,12 +160,12 @@ export interface IStoragePort {
   /**
    * Compiles and executes an abstract syntax tree query via native getAll or IDBCursor.
    */
-  cursor<T>(ast: QueryAST<T>): Promise<T[]>;
+  cursor<T>(ast: QueryAST<T>, signal?: AbortSignal): Promise<T[]>;
 
   /**
    * Executes a query and returns each result with its actual primary key when supported.
    */
-  cursorWithKeys?<T>(ast: QueryAST<T>): Promise<StorageEntry<T>[]>;
+  cursorWithKeys?<T>(ast: QueryAST<T>, signal?: AbortSignal): Promise<StorageEntry<T>[]>;
 
   /**
    * Queries storage quota and usage from the browser.

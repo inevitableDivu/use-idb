@@ -12,6 +12,7 @@ import type { StoreConfig } from "../types/schema";
 import { isValidKey, toKeyString } from "./key-serializer";
 import type { IStoragePort } from "../ports/storage.port";
 import { MiddlewarePipeline } from "../adapters/middleware/pipeline";
+import { compileQueryPlan, type QueryPlanSummary } from "./query/query-plan";
 
 /**
  * Fluent, type-safe query builder that compiles down to native
@@ -29,6 +30,7 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
   private middleware: MiddlewarePipeline | null;
   private storeConfig?: StoreConfig<T>;
   private comparisonPredicates: QueryFilterPredicate<T>[] = [];
+  private executionSignal?: AbortSignal;
 
   constructor(
     storage: IStoragePort,
@@ -66,6 +68,18 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
     return this as unknown as WhereClause<T, TStore, ResolveWhereValue<T, TStore, K>, TResult>;
   }
 
+  /** Attach a cancellation signal for this execution without changing the query description. */
+  withSignal(signal: AbortSignal): this {
+    this.executionSignal = signal;
+    return this;
+  }
+
+  private throwIfAborted(): void {
+    if (this.executionSignal?.aborted) {
+      throw new DOMException("The query was aborted.", "AbortError");
+    }
+  }
+
   private setField(field: string): void {
     const indexes = this.storeConfig?.indexes ?? {};
     const directIndex = indexes[field];
@@ -74,12 +88,24 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
     );
     const matchingIndex = directIndex ? [field, directIndex] as const : propertyIndex;
     const fieldPath = matchingIndex?.[1].keyPath ?? field;
+    const indexName = matchingIndex?.[0];
+    const accessPathChanged =
+      this.ast.fieldName !== field ||
+      this.ast.indexName !== indexName ||
+      JSON.stringify(this.ast.fieldPath) !== JSON.stringify(fieldPath);
+
+    // A key range belongs to the index/primary-key path on which it was built.
+    // Never carry it across field or index changes while composing a query.
+    if (accessPathChanged) {
+      this.ast.range = undefined;
+      this.ast.primaryKeyLookup = false;
+      this.ast.primaryKeyValue = undefined;
+    }
+
     this.ast.fieldName = field;
     this.ast.fieldPath = fieldPath;
-    this.ast.indexName = matchingIndex?.[0];
+    this.ast.indexName = indexName;
     this.ast.indexMultiEntry = matchingIndex?.[1].multiEntry ?? false;
-    this.ast.primaryKeyLookup = false;
-    this.ast.primaryKeyValue = undefined;
   }
 
   private pathsEqual(path: string | readonly string[], field: string): boolean {
@@ -283,6 +309,24 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
     if (Array.isArray(left) && Array.isArray(right)) {
       return left.length === right.length && left.every((value, index) => this.valueEquals(value, right[index]));
     }
+    const leftBinary = left instanceof ArrayBuffer
+      ? new Uint8Array(left)
+      : ArrayBuffer.isView(left)
+        ? new Uint8Array(left.buffer, left.byteOffset, left.byteLength)
+        : null;
+    const rightBinary = right instanceof ArrayBuffer
+      ? new Uint8Array(right)
+      : ArrayBuffer.isView(right)
+        ? new Uint8Array(right.buffer, right.byteOffset, right.byteLength)
+        : null;
+    if (leftBinary || rightBinary) {
+      return Boolean(
+        leftBinary &&
+        rightBinary &&
+        leftBinary.byteLength === rightBinary.byteLength &&
+        leftBinary.every((byte, index) => byte === rightBinary[index]),
+      );
+    }
     return Object.is(left, right);
   }
 
@@ -395,7 +439,15 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
    * Returns a copy of the underlying query AST representation.
    */
   getAST(): QueryAST<T> {
-    return { ...this.ast };
+    return compileQueryPlan(this.ast).ast;
+  }
+
+  /**
+   * Explains which execution path the current query will use without reading storage.
+   * This is intended for debugging unexpected scans, JavaScript filtering, and in-memory sorting.
+   */
+  explain(): QueryPlanSummary {
+    return compileQueryPlan(this.ast).summary;
   }
 
   /**
@@ -405,10 +457,12 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
    * @returns Promise resolving to an array of matched records.
    */
   async toArray(): Promise<TResult[]> {
-    const needsPostSort = this.ast.orderField !== undefined;
+    this.throwIfAborted();
+    const plan = compileQueryPlan(this.ast);
+    const needsPostSort = plan.summary.requiresPostSort;
     const ast = needsPostSort
-      ? { ...this.ast, offsetCount: 0, limitCount: undefined }
-      : this.ast;
+      ? { ...plan.ast, offsetCount: 0, limitCount: undefined }
+      : plan.ast;
     let results: T[] = [];
     let resultKeys: (IDBValidKey | undefined)[] = [];
     if (
@@ -418,16 +472,19 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
       (ast.limitCount === undefined || ast.limitCount > 0)
     ) {
       const result = await this.storage.get<T>(ast.storeName, ast.primaryKeyValue);
+      this.throwIfAborted();
       if (result !== undefined) {
         results.push(result);
         resultKeys.push(ast.primaryKeyValue);
       }
     } else if (this.storage.cursorWithKeys) {
-      const entries = await this.storage.cursorWithKeys<T>(ast);
+      const entries = await this.storage.cursorWithKeys<T>(ast, this.executionSignal);
+      this.throwIfAborted();
       results = entries.map((entry) => entry.value);
       resultKeys = entries.map((entry) => entry.key);
     } else {
-      results = await this.storage.cursor(ast);
+      results = await this.storage.cursor(ast, this.executionSignal);
+      this.throwIfAborted();
       // Compatibility path for custom storage adapters that have not implemented
       // key-aware reads yet. Inline and compound key paths remain supported.
       const keyPath = this.storeConfig?.keyPath;
@@ -451,11 +508,13 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
     if (this.middleware) {
       const transformed: T[] = [];
       for (let index = 0; index < results.length; index++) {
+        this.throwIfAborted();
         const processed = await this.middleware.runAfterRead(
           this.ast.storeName,
           results[index],
           resultKeys[index],
         );
+        this.throwIfAborted();
         transformed.push(processed as T);
       }
       results = transformed;
@@ -509,20 +568,25 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
    * @returns Total count of matching records.
    */
   async count(): Promise<number> {
+    this.throwIfAborted();
     this.ast.isCount = true;
-    // If there's no filter, use native count for performance
-    if (!this.ast.filterPredicate) {
-      const range = this.ast.range instanceof IDBKeyRange ? this.ast.range : undefined;
+    const plan = compileQueryPlan(this.ast);
+    if (this.executionSignal) {
+      const rows = await this.storage.cursor(plan.ast, this.executionSignal);
+      this.throwIfAborted();
+      return rows.length;
+    }
+    if (plan.canUseNativeCount) {
       return this.storage.count(
-        this.ast.storeName,
-        range,
-        this.ast.indexName,
-        this.ast.fieldPath,
-        this.ast.indexMultiEntry,
+        plan.ast.storeName,
+        plan.ast.range,
+        plan.ast.indexName,
+        plan.ast.fieldPath,
+        plan.ast.indexMultiEntry,
       );
     }
-    // With a filter, we need to iterate
-    const results = await this.storage.cursor(this.ast);
+    // A post-filter or post-sort requires executing the full query semantics.
+    const results = await this.storage.cursor(plan.ast);
     return results.length;
   }
 

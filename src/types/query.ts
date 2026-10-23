@@ -16,6 +16,11 @@ export type CursorDirection = "next" | "nextunique" | "prev" | "prevunique";
  */
 export type QueryFilterPredicate<T> = (record: T) => boolean;
 
+/** Context supplied to live query callbacks for cooperative cancellation of custom async work. */
+export interface QueryExecutionContext {
+  readonly signal: AbortSignal;
+}
+
 export type ResolveWhereValue<TItem extends object, TStore, K extends string> = K extends keyof TItem
   ? TItem[K]
   : TStore extends { readonly $types: { readonly indexes: infer TIndexes } }
@@ -53,6 +58,19 @@ export interface WhereClause<TItem extends object, TStore, TValue, TResult = TIt
   toArray(): Promise<TResult[]>;
   first(): Promise<TResult | undefined>;
   count(): Promise<number>;
+  /** Inspect the selected access path and any required JavaScript post-processing. */
+  explain(): {
+    readonly storeName: string;
+    readonly accessPath: "primary-key" | "index" | "object-store";
+    readonly indexName?: string;
+    readonly usesKeyRange: boolean;
+    readonly requiresPostFilter: boolean;
+    readonly requiresPostSort: boolean;
+    readonly sortField?: string;
+    readonly sortDirection?: SortDirection;
+    readonly pagination: "cursor" | "materialize-and-slice";
+    readonly projectionFields?: readonly string[];
+  };
 }
 
 export interface QueryBuilder<TItem extends object, TStore = unknown, TResult = TItem> {
@@ -74,6 +92,19 @@ export interface QueryBuilder<TItem extends object, TStore = unknown, TResult = 
   toArray(): Promise<TResult[]>;
   first(): Promise<TResult | undefined>;
   count(): Promise<number>;
+  /** Inspect the selected access path and any required JavaScript post-processing. */
+  explain(): {
+    readonly storeName: string;
+    readonly accessPath: "primary-key" | "index" | "object-store";
+    readonly indexName?: string;
+    readonly usesKeyRange: boolean;
+    readonly requiresPostFilter: boolean;
+    readonly requiresPostSort: boolean;
+    readonly sortField?: string;
+    readonly sortDirection?: SortDirection;
+    readonly pagination: "cursor" | "materialize-and-slice";
+    readonly projectionFields?: readonly string[];
+  };
 }
 
 /**
@@ -173,4 +204,11 @@ export interface LiveQueryOptions<T = unknown> {
    * Explicit cache query key to disambiguate dynamic filter predicates or queries.
    */
   queryKey?: string;
+
+  /**
+   * Object stores read by an async/custom query that does not return QueryBuilder metadata.
+   * Supplying this skips dependency-discovery invocation of the callback, avoiding duplicate
+   * fetches or other work before the real execution. Such queries are invalidated at store level.
+   */
+  stores?: readonly string[];
 }

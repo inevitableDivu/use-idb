@@ -27,7 +27,11 @@ export class DependencyTracker {
     }
 
     // 'clear' and 'force_release' always invalidate everything in the store
-    if (envelope.operation === "clear" || envelope.operation === "force_release") {
+    if (
+      envelope.operation === "clear" ||
+      envelope.operation === "invalidate" ||
+      envelope.operation === "force_release"
+    ) {
       return true;
     }
 
