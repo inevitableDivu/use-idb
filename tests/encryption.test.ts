@@ -136,6 +136,55 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
     expect(decrypted.secret).toBe("generated-key-value");
   });
 
+  it("uses collision-resistant canonical key context for encryption AAD", async () => {
+    const key = await generateAesKey();
+    const middleware = createEncryptionMiddleware(key, ["secret"]);
+
+    const numericKeyRecord = await middleware.beforeWrite?.({
+      storeName: "records",
+      operation: "put",
+      key: 1,
+      value: { secret: "number-key" },
+    });
+    await expect(
+      middleware.afterRead?.({
+        storeName: "records",
+        key: "1",
+        value: numericKeyRecord,
+      }),
+    ).rejects.toThrow();
+
+    const compoundKeyRecord = await middleware.beforeWrite?.({
+      storeName: "records",
+      operation: "put",
+      key: ["a,b"],
+      value: { secret: "compound-key" },
+    });
+    await expect(
+      middleware.afterRead?.({
+        storeName: "records",
+        key: ["a", "b"],
+        value: compoundKeyRecord,
+      }),
+    ).rejects.toThrow();
+
+    // Two binary key views with the same visible bytes represent the same key.
+    const backing = new Uint8Array([9, 1, 2, 8]);
+    const viewKey = backing.subarray(1, 3);
+    const binaryRecord = await middleware.beforeWrite?.({
+      storeName: "records",
+      operation: "put",
+      key: viewKey,
+      value: { secret: "binary-key" },
+    });
+    const binaryRead = (await middleware.afterRead?.({
+      storeName: "records",
+      key: new Uint8Array([1, 2]),
+      value: binaryRecord,
+    })) as { secret: string };
+    expect(binaryRead.secret).toBe("binary-key");
+  });
+
   it("rejects ciphertext transposition across stores or keys via context-bound AAD", async () => {
     const key = await generateAesKey();
     const middleware = createEncryptionMiddleware(key, ["secret"]);
