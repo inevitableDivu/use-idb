@@ -27,7 +27,7 @@ export type { QuerySnapshot, CacheEntry, L1CacheOptions } from "./core/l1-cache"
 export { DependencyTracker } from "./core/dependency-tracker";
 export { WriteCoalescer } from "./core/write-coalescer";
 export type { WriteCoalescerOptions } from "./core/write-coalescer";
-export { serializeKey, isValidKey, hashQuery } from "./core/key-serializer";
+export { serializeKey, isValidKey, toKeyString, hashQuery } from "./core/key-serializer";
 
 // ── Ports ──
 export type { IStoragePort, IStorageTransaction, StorageBatchOp, StorageEntry } from "./ports/storage.port";
