@@ -47,19 +47,15 @@ export function toKeyString(key: unknown): string {
     if (typeof value === "boolean") return ["boolean", value];
     if (typeof value === "number") {
       if (Number.isNaN(value)) return ["number", "NaN"];
-      if (Object.is(value, -0)) return ["number", "-0"];
+      if (Object.is(value, -0)) return ["number", 0];
       if (value === Infinity) return ["number", "+Infinity"];
       if (value === -Infinity) return ["number", "-Infinity"];
       return ["number", value];
     }
     if (value instanceof Date) return ["date", value.getTime()];
-    if (value instanceof ArrayBuffer) return ["array-buffer", Array.from(new Uint8Array(value))];
+    if (value instanceof ArrayBuffer) return ["binary", Array.from(new Uint8Array(value))];
     if (ArrayBuffer.isView(value)) {
-      return [
-        "array-buffer-view",
-        value.constructor.name,
-        Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)),
-      ];
+      return ["binary", Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))];
     }
     if (Array.isArray(value)) return ["array", value.map(encode)];
     if (typeof value === "object") {
