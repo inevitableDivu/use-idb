@@ -72,6 +72,7 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
         version: 1,
         stores: {
           records: store<SecretRecord>()({ keyPath: "id" }),
+          external: {},
         },
       },
       {
@@ -95,6 +96,17 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
       await expect(db.get("records", original.id)).resolves.toEqual(original);
       await expect(db.getAll("records")).resolves.toEqual([original]);
       await expect(db.query("records").toArray()).resolves.toEqual([original]);
+
+      // Out-of-line stores must retain the actual storage key for middleware AAD too.
+      const externalOriginal = { secret: "external private value", label: "metadata" };
+      await db.put("external", externalOriginal, "external-1");
+      const externalPersisted = (await db.storage.get("external", "external-1")) as {
+        secret: { __encrypted?: boolean };
+      };
+      expect(externalPersisted.secret.__encrypted).toBe(true);
+      await expect(db.get("external", "external-1")).resolves.toEqual(externalOriginal);
+      await expect(db.getAll("external")).resolves.toEqual([externalOriginal]);
+      await expect(db.query("external").toArray()).resolves.toEqual([externalOriginal]);
     } finally {
       await db.destroy();
     }
