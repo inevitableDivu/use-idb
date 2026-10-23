@@ -305,8 +305,14 @@ A write resolves after the owning storage transaction commits. If the transactio
 Use <code>db.transaction</code> when a set of changes must succeed or fail together:
 
 ```ts
+// Assumes db has "inventory" and "orders" stores.
+interface InventoryItem {
+  id: string;
+  remaining: number;
+}
+
 await db.transaction(["inventory", "orders"], "readwrite", async (tx) => {
-  const item = await tx.get("inventory", "item-1");
+  const item = await tx.get<InventoryItem>("inventory", "item-1");
   if (!item || item.remaining < 1) {
     throw new Error("Item is unavailable");
   }
@@ -410,12 +416,12 @@ const result = useLiveQuery(
 
 Treat the callback as a **pure query description**. It may be invoked more than once as dependencies are inspected and data is fetched. Do not perform writes, analytics, or other side effects inside it.
 
-For custom asynchronous work, pass an explicit <code>stores</code> list so changes to those stores invalidate the query; use the optional abort signal to cancel superseded work:
+For custom asynchronous work, pass an explicit <code>stores</code> list so changes to those stores invalidate the query. The factory-bound hook can run custom async work as well:
 
 ```tsx
 const { data, error } = useLiveQuery(
-  async (_database, { signal }) => {
-    const response = await fetch("/api/suggestions", { signal });
+  async () => {
+    const response = await fetch("/api/suggestions");
     if (!response.ok) throw new Error("Could not load suggestions");
     return response.json() as Promise<string[]>;
   },
@@ -423,6 +429,8 @@ const { data, error } = useLiveQuery(
   { stores: ["users"], queryKey: "user-suggestions" },
 );
 ```
+
+The unbound <code>useLiveQuery</code> export also accepts a second callback context with an <code>AbortSignal</code> for cancellable async work. When it must use a particular database instance, render the component below <code>IndexedDBProvider</code>.
 
 Other options include <code>initialData</code>, <code>enabled</code>, <code>queryKey</code>, and <code>suspense</code>. Use <code>queryKey</code> to distinguish otherwise similar queries when captured state affects results.
 
