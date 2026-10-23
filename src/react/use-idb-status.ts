@@ -1,4 +1,4 @@
-import { useSyncExternalStore, useCallback } from "react";
+import { useSyncExternalStore, useCallback, useEffect } from "react";
 import { useDatabase } from "./context";
 import { Engine } from "../core/engine";
 import type { IDBStatusSnapshot } from "../types/status";
@@ -6,9 +6,17 @@ import type { IDBStatusSnapshot } from "../types/status";
 const SSR_STATUS_SNAPSHOT: IDBStatusSnapshot = Object.freeze({
   connectionState: "SSR",
   isFallbackMode: true,
+  fallbackReason: "Status is not available during server rendering.",
+  persistentStorageGranted: null,
   isUpgradeBlocked: false,
   requiresReloadForUpgrade: false,
   quota: Object.freeze({
+    usageBytes: null,
+    quotaBytes: null,
+    percentUsed: null,
+    isPersisted: null,
+  }),
+  refreshQuota: async () => ({
     usageBytes: null,
     quotaBytes: null,
     percentUsed: null,
@@ -49,6 +57,12 @@ export function useIDBStatus(customEngine?: Engine): IDBStatusSnapshot {
   const getServerSnapshot = useCallback((): IDBStatusSnapshot => {
     return SSR_STATUS_SNAPSHOT;
   }, []);
+
+  // Refresh asynchronously after hydration so quota/persistence telemetry is useful
+  // on first use without making rendering wait for browser storage APIs.
+  useEffect(() => {
+    void engine.refreshQuota().catch(() => {});
+  }, [engine]);
 
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

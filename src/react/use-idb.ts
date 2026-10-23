@@ -182,7 +182,7 @@ export function useIdb<T>(key: string, options?: UseIdbOptions<T>): UseIdbReturn
     async (updater: T | ((prev: T | undefined) => T)) => {
       const performUpdate = async () => {
         const currentVal = isFunctionUpdater(updater)
-          ? ((await engine.get(storeName, key)) as T | undefined) ?? options?.defaultValue
+          ? (((await engine.get(storeName, key)) as T | undefined) ?? options?.defaultValue)
           : undefined;
         const nextVal = isFunctionUpdater(updater) ? updater(currentVal) : updater;
         await engine.put(storeName, nextVal, key, {

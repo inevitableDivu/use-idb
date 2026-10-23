@@ -2,7 +2,9 @@ import type { IDBMiddleware } from "../../ports/middleware.port";
 import { defaultSerializer, type SerializationHook } from "./serializer";
 
 export class CryptographicContextUnavailableError extends Error {
-  constructor(message = "WebCrypto API (crypto.subtle) is not available in the current execution environment.") {
+  constructor(
+    message = "WebCrypto API (crypto.subtle) is not available in the current execution environment.",
+  ) {
     super(message);
     this.name = "CryptographicContextUnavailableError";
   }
@@ -173,10 +175,10 @@ export function createEncryptionMiddleware(
   const keyRing: KeyRing =
     "primaryKeyId" in keyOrKeyRing
       ? keyOrKeyRing
-      : options?.keyRing ?? {
+      : (options?.keyRing ?? {
           primaryKeyId: "default",
           keys: { default: keyOrKeyRing },
-        };
+        });
 
   const serializer = options?.serializer ?? defaultSerializer;
   const encryptionCounters = new Map<string, number>();
@@ -197,7 +199,7 @@ export function createEncryptionMiddleware(
     }
   }
 
-    /**
+  /**
    * Canonical, type-tagged representation of an IndexedDB key for AAD.
    * JSON-encoding the tagged tree avoids collisions between e.g. number 1 and
    * string "1", or compound keys whose string elements contain delimiters.
@@ -243,7 +245,8 @@ export function createEncryptionMiddleware(
     fieldPath: string,
   ): Uint8Array<ArrayBuffer> {
     // Preserve the historical JavaScript string conversion for existing ciphertexts.
-    const keyRepr = key !== undefined ? String(key as string) : "*";
+    // eslint-disable-next-line typescript/no-base-to-string -- Keep legacy AAD coercion unchanged.
+    const keyRepr = key !== undefined ? String(key) : "*";
     const encoded = new TextEncoder().encode(`v1:${storeName}:${keyRepr}:${fieldPath}`);
     const buffer = new ArrayBuffer(encoded.byteLength);
     const aad = new Uint8Array(buffer);
@@ -253,6 +256,7 @@ export function createEncryptionMiddleware(
 
   return {
     name: "encryption",
+    transformedFieldPaths: Object.freeze([...new Set(fieldPaths)]),
 
     async beforeWrite(ctx) {
       if (!hasCrypto) {
@@ -336,14 +340,22 @@ export function createEncryptionMiddleware(
           const legacyKey = val.keyBound === false ? undefined : ctx.key;
           try {
             plaintext = await crypto.subtle.decrypt(
-              { name: "AES-GCM", iv, additionalData: computeLegacyAad(ctx.storeName, legacyKey, field) },
+              {
+                name: "AES-GCM",
+                iv,
+                additionalData: computeLegacyAad(ctx.storeName, legacyKey, field),
+              },
               decryptKey,
               ciphertext,
             );
           } catch (legacyKeyError) {
             if (legacyKey === undefined) throw legacyKeyError;
             plaintext = await crypto.subtle.decrypt(
-              { name: "AES-GCM", iv, additionalData: computeLegacyAad(ctx.storeName, undefined, field) },
+              {
+                name: "AES-GCM",
+                iv,
+                additionalData: computeLegacyAad(ctx.storeName, undefined, field),
+              },
               decryptKey,
               ciphertext,
             );

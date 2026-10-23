@@ -1,25 +1,65 @@
 import type { ISyncPort, MutationEnvelope } from "../../ports/sync.port";
 
 /**
- * Validates untrusted payload received over BroadcastChannel to prevent prototype
- * pollution or malformed messages from crashing DependencyTracker or causing invalidation storms.
+ * Validate untrusted BroadcastChannel data before it reaches cache invalidation logic.
+ * Unversioned envelopes are accepted for compatibility with tabs running the previous release.
  */
+function isSafeIDBKey(
+  value: unknown,
+  depth = 0,
+  ancestors = new WeakSet<object>(),
+): value is IDBValidKey {
+  if (depth > 32 || value === null || value === undefined) return false;
+  if (typeof value === "string") return true;
+  if (typeof value === "number") return !Number.isNaN(value);
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return true;
+  if (Array.isArray(value)) {
+    if (value.length > 256 || ancestors.has(value)) return false;
+    ancestors.add(value);
+    const valid = value.every((part) => isSafeIDBKey(part, depth + 1, ancestors));
+    ancestors.delete(value);
+    return valid;
+  }
+  return false;
+}
+
 export function isMutationEnvelope(data: unknown): data is MutationEnvelope {
   if (data === null || typeof data !== "object") return false;
   const env = data as Partial<MutationEnvelope>;
+  if (env.version !== undefined && env.version !== 1) return false;
+  if (
+    typeof env.originTabId !== "string" ||
+    env.originTabId.length === 0 ||
+    env.originTabId.length > 128
+  ) {
+    return false;
+  }
+  if (typeof env.timestamp !== "number" || !Number.isFinite(env.timestamp)) return false;
+  if (
+    typeof env.storeName !== "string" ||
+    env.storeName.length === 0 ||
+    env.storeName.length > 256
+  ) {
+    return false;
+  }
+  if (
+    env.operation !== "put" &&
+    env.operation !== "delete" &&
+    env.operation !== "clear" &&
+    env.operation !== "bulk" &&
+    env.operation !== "invalidate" &&
+    env.operation !== "force_release"
+  ) {
+    return false;
+  }
+  if (env.operation === "force_release" && env.storeName !== "*") return false;
   return (
-    typeof env.originTabId === "string" &&
-    typeof env.timestamp === "number" &&
-    typeof env.storeName === "string" &&
-    (env.operation === "put" ||
-      env.operation === "delete" ||
-      env.operation === "clear" ||
-      env.operation === "bulk" ||
-      env.operation === "force_release") &&
-    Array.isArray(env.affectedKeys)
+    Array.isArray(env.affectedKeys) &&
+    env.affectedKeys.length <= 10_000 &&
+    env.affectedKeys.every((key) => isSafeIDBKey(key))
   );
 }
-
 /**
  * Cross-tab synchronization adapter implementing {@link ISyncPort} via browser `BroadcastChannel`.
  *
@@ -50,7 +90,10 @@ export class BroadcastSyncAdapter implements ISyncPort {
         if (!isMutationEnvelope(event.data)) {
           return;
         }
-        const envelope = event.data;
+        // Normalize unversioned legacy messages before they reach code that treats the
+        // envelope as the current public type.
+        const envelope: MutationEnvelope =
+          event.data.version === undefined ? { ...event.data, version: 1 } : event.data;
         // Filter out self-originated events
         if (envelope.originTabId === this.tabId) return;
         for (const listener of this.listeners) {
@@ -66,7 +109,11 @@ export class BroadcastSyncAdapter implements ISyncPort {
    * @param envelope - Mutation metadata envelope.
    */
   publish(envelope: MutationEnvelope): void {
-    this.channel?.postMessage(envelope);
+    try {
+      this.channel?.postMessage(envelope);
+    } catch {
+      // Notifications are best-effort. A channel failure cannot roll back a committed database write.
+    }
   }
 
   /**

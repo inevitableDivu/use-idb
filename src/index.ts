@@ -19,9 +19,32 @@ export {
   getDatabase,
   getDefaultEngine,
   DatabaseConfigurationConflictError,
+  TransactionMiddlewareUnsupportedError,
 } from "./core/engine";
-export type { EngineConfig, DatabaseInstance } from "./core/engine";
+export {
+  DatabaseDestroyedError,
+  DatabaseSchemaTransitionError,
+  MiddlewareSchemaConflictError,
+} from "./core/errors";
+export type { DatabaseInstance } from "./core/engine";
+export type {
+  EngineConfig,
+  DatabaseRuntimeConfig,
+  DatabaseFactoryOptions,
+  DatabaseAdapters,
+  CacheConfig,
+  WriteConfig,
+  CrossTabConfig,
+  FallbackConfig,
+  ResolvedEngineConfig,
+} from "./core/config";
+export type {
+  DatabaseDiagnosticsConfig,
+  DatabaseDiagnosticEvent,
+} from "./core/observability/diagnostics";
 export { QueryBuilder } from "./core/query-engine";
+export { compileQueryPlan } from "./core/query/query-plan";
+export type { QueryPlan, QueryPlanSummary, QueryAccessPath } from "./core/query/query-plan";
 export { L1Cache, DELETED_SENTINEL } from "./core/l1-cache";
 export type { QuerySnapshot, CacheEntry, L1CacheOptions } from "./core/l1-cache";
 export { DependencyTracker } from "./core/dependency-tracker";
@@ -30,13 +53,22 @@ export type { WriteCoalescerOptions } from "./core/write-coalescer";
 export { serializeKey, isValidKey, toKeyString, hashQuery } from "./core/key-serializer";
 
 // ── Ports ──
-export type { IStoragePort, IStorageTransaction, StorageBatchOp, StorageEntry } from "./ports/storage.port";
+export type {
+  IStoragePort,
+  IStorageTransaction,
+  StorageBatchOp,
+  StorageEntry,
+} from "./ports/storage.port";
 export type { ISyncPort, MutationEnvelope } from "./ports/sync.port";
 export type { ILockPort } from "./ports/lock.port";
 export type { IDBMiddleware } from "./ports/middleware.port";
 
 // ── Adapters ──
-export { IndexedDBStorageAdapter, DatabaseClosingForUpgradeError } from "./adapters/storage/idb-adapter";
+export {
+  IndexedDBStorageAdapter,
+  DatabaseClosingForUpgradeError,
+  DatabaseMigrationError,
+} from "./adapters/storage/idb-adapter";
 export { MemoryStorageAdapter } from "./adapters/storage/memory-adapter";
 export { runMigrations } from "./adapters/storage/migration-runner";
 export { BroadcastSyncAdapter } from "./adapters/sync/broadcast-adapter";
@@ -49,7 +81,11 @@ export {
   CryptographicContextUnavailableError,
   KeyNotFoundError,
 } from "./adapters/middleware/encryption";
-export type { KeyRing, EncryptedFieldEnvelope, EncryptionOptions } from "./adapters/middleware/encryption";
+export type {
+  KeyRing,
+  EncryptedFieldEnvelope,
+  EncryptionOptions,
+} from "./adapters/middleware/encryption";
 export { defaultSerializer } from "./adapters/middleware/serializer";
 export type { SerializationHook } from "./adapters/middleware/serializer";
 
@@ -61,6 +97,8 @@ export type {
   StoreConfig,
   StoreDefinition,
   StoreInput,
+  OutOfLineStoreInput,
+  OutOfLineStoreDefinition,
   DefaultKeyPath,
   IndexInput,
   IndexObjectConfig,
@@ -79,9 +117,10 @@ export type {
   InferStoreItem,
   InferStoreKey,
 } from "./types/schema";
-export { store } from "./types/schema";
+export { store, outOfLineStore, validateDatabaseSchema } from "./types/schema";
 export type {
   QueryAST,
+  QueryExecutionContext,
   CursorDirection,
   QueryFilterPredicate,
   LiveQueryOptions,

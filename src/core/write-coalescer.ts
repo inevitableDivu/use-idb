@@ -4,6 +4,7 @@ import { DELETED_SENTINEL, type L1Cache } from "./l1-cache";
 import type { MiddlewarePipeline } from "../adapters/middleware/pipeline";
 import { toKeyString } from "./key-serializer";
 import type { DependencyTracker } from "./dependency-tracker";
+import type { MutationCoordinator } from "./operations/mutation-coordinator";
 
 interface QueuedPut {
   type: "put";
@@ -15,6 +16,7 @@ interface QueuedPut {
   rejecters: Array<(err: Error) => void>;
   coalescedDeleteResolvers?: Array<() => void>;
   coalescedDeleteRejecters?: Array<(err: Error) => void>;
+  mutationIds: string[];
 }
 
 interface QueuedDelete {
@@ -23,6 +25,7 @@ interface QueuedDelete {
   optimistic: boolean;
   resolvers: Array<() => void>;
   rejecters: Array<(err: Error) => void>;
+  mutationIds: string[];
 }
 
 type QueuedOp = QueuedPut | QueuedDelete;
@@ -55,15 +58,18 @@ export interface WriteCoalescerOptions {
  */
 export class WriteCoalescer {
   private batches = new Map<string, StoreBatch>();
+  private flushChains = new Map<string, Promise<void>>();
+  private mutationSequence = 0;
   private storage: IStoragePort;
 
   constructor(
     storage: IStoragePort,
     private readonly l1Cache: L1Cache,
-    private readonly syncPort: ISyncPort,
+    private syncPort: ISyncPort,
     private readonly dependencyTracker?: DependencyTracker,
     private readonly middleware?: MiddlewarePipeline,
     private readonly options?: WriteCoalescerOptions,
+    private mutationCoordinator?: MutationCoordinator,
   ) {
     this.storage = storage;
   }
@@ -73,6 +79,42 @@ export class WriteCoalescer {
    */
   setStorage(storage: IStoragePort): void {
     this.storage = storage;
+  }
+
+  /** Replace the sync adapter when the engine switches to isolated in-memory storage. */
+  setSyncPort(syncPort: ISyncPort): void {
+    this.syncPort = syncPort;
+    this.mutationCoordinator?.setSyncPort(syncPort);
+  }
+
+  setMutationCoordinator(coordinator: MutationCoordinator): void {
+    this.mutationCoordinator = coordinator;
+  }
+
+  private nextMutationId(): string {
+    this.mutationSequence += 1;
+    return `m${this.mutationSequence}`;
+  }
+
+  private publishSafely(envelope: MutationEnvelope): void {
+    try {
+      this.syncPort.publish(envelope);
+    } catch {
+      // A notification failure must never turn an already committed durable write into a rejection.
+      // Subscribers can still recover via refetch; BroadcastChannel is only an invalidation hint.
+    }
+  }
+
+  /** Flush all queued writes before close/destroy. */
+  async drain(): Promise<void> {
+    while (this.batches.size > 0 || this.flushChains.size > 0) {
+      const pendingStores = [...this.batches.keys()];
+      if (pendingStores.length > 0) {
+        await Promise.all(pendingStores.map((storeName) => this.flush(storeName)));
+      } else {
+        await Promise.all([...this.flushChains.values()]);
+      }
+    }
   }
 
   private getOrCreateBatch(storeName: string): StoreBatch {
@@ -120,6 +162,7 @@ export class WriteCoalescer {
     const batch = this.getOrCreateBatch(storeName);
     const opKey = key !== undefined ? toKeyString(key) : Symbol("autoincrement");
     const optimistic = options?.optimistic ?? true;
+    const mutationId = this.nextMutationId();
 
     // Apply optimistic update to cache if key is known
     if (optimistic && key !== undefined) {
@@ -128,7 +171,7 @@ export class WriteCoalescer {
         [storeName],
         key,
       );
-      this.l1Cache.setOptimistic(entry, value);
+      this.l1Cache.setOptimistic(entry, value, mutationId);
     }
 
     return new Promise<IDBValidKey>((resolve, reject) => {
@@ -137,6 +180,8 @@ export class WriteCoalescer {
         if (existing.type === "put") {
           // Coalesce puts for same key: update value, chain resolvers
           existing.value = value;
+          existing.mutationIds.push(mutationId);
+          existing.optimistic = existing.optimistic || optimistic;
           existing.resolvers.push(resolve);
           existing.rejecters.push(reject);
         } else {
@@ -147,11 +192,12 @@ export class WriteCoalescer {
             type: "put",
             key,
             value,
-            optimistic,
+            optimistic: optimistic || existing.optimistic,
             resolvers,
             rejecters,
             coalescedDeleteResolvers: existing.resolvers,
             coalescedDeleteRejecters: existing.rejecters,
+            mutationIds: [...existing.mutationIds, mutationId],
           });
         }
       } else {
@@ -162,6 +208,7 @@ export class WriteCoalescer {
           optimistic,
           resolvers: [resolve],
           rejecters: [reject],
+          mutationIds: [mutationId],
         });
       }
 
@@ -177,10 +224,11 @@ export class WriteCoalescer {
     const batch = this.getOrCreateBatch(storeName);
     const opKey = toKeyString(key);
     const optimistic = options?.optimistic ?? true;
+    const mutationId = this.nextMutationId();
 
     if (optimistic) {
       const entry = this.l1Cache.getOrCreateEntry(`record:${storeName}:${opKey}`, [storeName], key);
-      this.l1Cache.setOptimistic(entry, DELETED_SENTINEL);
+      this.l1Cache.setOptimistic(entry, DELETED_SENTINEL, mutationId);
     }
 
     return new Promise<void>((resolve, reject) => {
@@ -188,18 +236,25 @@ export class WriteCoalescer {
       if (existing) {
         if (existing.type === "put") {
           // Coalesce put + delete -> delete
-          for (const rej of existing.rejecters) {
-            rej(new Error(`Operation cancelled: record ${opKey} was deleted before flush`));
-          }
+          const cancelled = new Error(
+            `Operation cancelled: record ${opKey} was deleted before flush`,
+          );
+          for (const rej of existing.rejecters) rej(cancelled);
+          for (const rej of existing.coalescedDeleteRejecters ?? []) rej(cancelled);
+          const entry = this.l1Cache.getEntry(`record:${storeName}:${opKey}`);
+          if (entry) this.l1Cache.rollbackMutations(entry, existing.mutationIds);
           batch.operations.set(opKey, {
             type: "delete",
             key,
             optimistic,
             resolvers: [resolve],
             rejecters: [reject],
+            mutationIds: [mutationId],
           });
         } else {
-          // Coalesce delete + delete
+          // Coalesce delete + delete without losing either optimistic mutation.
+          existing.mutationIds.push(mutationId);
+          existing.optimistic = existing.optimistic || optimistic;
           existing.resolvers.push(resolve);
           existing.rejecters.push(reject);
         }
@@ -210,6 +265,7 @@ export class WriteCoalescer {
           optimistic,
           resolvers: [resolve],
           rejecters: [reject],
+          mutationIds: [mutationId],
         });
       }
 
@@ -222,9 +278,14 @@ export class WriteCoalescer {
     batch.clearRequested = true;
 
     // Reject all pending put/delete operations superseded by clear
+    const cancelled = new Error(`Operation cancelled: store ${storeName} was cleared before flush`);
     for (const op of batch.operations.values()) {
-      for (const rej of op.rejecters) {
-        rej(new Error(`Operation cancelled: store ${storeName} was cleared before flush`));
+      for (const rej of op.rejecters) rej(cancelled);
+      for (const rej of op.type === "put" ? (op.coalescedDeleteRejecters ?? []) : [])
+        rej(cancelled);
+      if (op.key !== undefined) {
+        const entry = this.l1Cache.getEntry(`record:${storeName}:${toKeyString(op.key)}`);
+        if (entry) this.l1Cache.rollbackMutations(entry, op.mutationIds);
       }
     }
     batch.operations.clear();
@@ -237,6 +298,17 @@ export class WriteCoalescer {
   }
 
   async flush(storeName: string): Promise<void> {
+    const previous = this.flushChains.get(storeName) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(() => this.flushBatch(storeName));
+    this.flushChains.set(storeName, next);
+    try {
+      await next;
+    } finally {
+      if (this.flushChains.get(storeName) === next) this.flushChains.delete(storeName);
+    }
+  }
+
+  private async flushBatch(storeName: string): Promise<void> {
     const batch = this.batches.get(storeName);
     if (!batch) return;
     this.batches.delete(storeName);
@@ -250,16 +322,24 @@ export class WriteCoalescer {
     if (batch.clearRequested) {
       try {
         await this.storage.clear(storeName);
-        this.l1Cache.incrementGeneration(storeName);
-        this.l1Cache.invalidateByStore(storeName);
-
-        this.syncPort.publish({
-          originTabId: this.syncPort.tabId,
-          timestamp: Date.now(),
-          storeName,
-          operation: "clear",
-          affectedKeys: [],
-        });
+        if (this.mutationCoordinator) {
+          this.mutationCoordinator.afterStoreCommit({
+            storeName,
+            operation: "clear",
+            affectedKeys: [],
+          });
+        } else {
+          this.l1Cache.incrementGeneration(storeName);
+          this.l1Cache.invalidateByStore(storeName);
+          this.publishSafely({
+            version: 1,
+            originTabId: this.syncPort.tabId,
+            timestamp: Date.now(),
+            storeName,
+            operation: "clear",
+            affectedKeys: [],
+          });
+        }
 
         for (const res of batch.clearResolvers) res();
       } catch (err) {
@@ -296,7 +376,7 @@ export class WriteCoalescer {
           // Rollback optimistic overlay for this failing operation
           if (op.optimistic && op.key !== undefined) {
             const entry = this.l1Cache.getEntry(`record:${storeName}:${toKeyString(op.key)}`);
-            if (entry) this.l1Cache.rollbackOptimistic(entry);
+            if (entry) this.l1Cache.rollbackMutations(entry, op.mutationIds);
           }
           for (const rej of op.rejecters) rej(error);
           for (const rej of op.coalescedDeleteRejecters ?? []) rej(error);
@@ -319,8 +399,7 @@ export class WriteCoalescer {
       // 4. Dispatch single atomic batch to storage
       const resultKeys = await this.storage.batch(storeName, storageOps);
 
-      // 5. Success handling
-      this.l1Cache.incrementGeneration(storeName);
+      // 5. The storage adapter has now confirmed the atomic batch commit.
       const affectedKeys: IDBValidKey[] = [];
 
       for (let i = 0; i < healthyOps.length; i++) {
@@ -335,12 +414,7 @@ export class WriteCoalescer {
           const entry = this.l1Cache.getEntry(`record:${storeName}:${toKeyString(resKey)}`);
           if (entry) {
             entry.retryCount = 0;
-            entry.status = "resolved";
-            entry.data = op.value as any;
-            entry.optimisticData = undefined;
-            entry.generationAtStart = this.l1Cache.getGeneration(storeName);
-            entry.error = null;
-            this.l1Cache.updateEntrySnapshot(entry);
+            this.l1Cache.commitMutations(entry, op.mutationIds, op.value as any);
           }
         }
 
@@ -349,12 +423,8 @@ export class WriteCoalescer {
           const entry = this.l1Cache.getEntry(`record:${storeName}:${toKeyString(op.key)}`);
           if (entry) {
             entry.retryCount = 0;
-            entry.status = "resolved";
-            entry.data = undefined;
-            entry.optimisticData = undefined;
             entry.generationAtStart = this.l1Cache.getGeneration(storeName);
-            entry.error = null;
-            this.l1Cache.updateEntrySnapshot(entry);
+            this.l1Cache.commitMutations(entry, op.mutationIds, undefined);
           }
         }
 
@@ -373,28 +443,40 @@ export class WriteCoalescer {
         }
       }
 
-      // 6. Broadcast mutation envelope and invalidate local cache queries
-      const envelope: MutationEnvelope = {
-        originTabId: this.syncPort.tabId,
-        timestamp: Date.now(),
-        storeName,
-        operation: healthyOps.length > 1 ? "bulk" : (healthyOps[0]!.type as "put" | "delete"),
-        affectedKeys,
-      };
-
-      if (this.dependencyTracker) {
-        this.l1Cache.invalidateMatching((entry) => {
-          if (entry.queryHash.startsWith(`record:${storeName}:`)) {
-            return false;
-          }
-          return this.dependencyTracker!.shouldInvalidate(entry, envelope);
+      // 6. Centralize all post-commit generation, invalidation, and notification behavior.
+      if (this.mutationCoordinator) {
+        this.mutationCoordinator.afterStoreCommit({
+          storeName,
+          operation: healthyOps.length > 1 ? "bulk" : (healthyOps[0]!.type as "put" | "delete"),
+          affectedKeys,
+          preserveRecordSnapshots: true,
         });
       } else {
-        this.l1Cache.invalidateByStore(storeName);
+        this.l1Cache.incrementGeneration(storeName);
+        const envelope: MutationEnvelope = {
+          version: 1,
+          originTabId: this.syncPort.tabId,
+          timestamp: Date.now(),
+          storeName,
+          operation: healthyOps.length > 1 ? "bulk" : (healthyOps[0]!.type as "put" | "delete"),
+          affectedKeys,
+        };
+        if (this.dependencyTracker) {
+          this.l1Cache.invalidateMatching((entry) => {
+            if (entry.queryHash.startsWith(`record:${storeName}:`)) return false;
+            return this.dependencyTracker!.shouldInvalidate(entry, envelope);
+          });
+        } else {
+          this.l1Cache.invalidateByStore(storeName);
+        }
+        if (affectedKeys.length > 0) this.publishSafely(envelope);
       }
 
-      if (affectedKeys.length > 0) {
-        this.syncPort.publish(envelope);
+      // Record snapshots represent the just-committed values. Mark them fresh after the
+      // coordinator increments this store's generation.
+      for (const key of affectedKeys) {
+        const entry = this.l1Cache.getEntry(`record:${storeName}:${toKeyString(key)}`);
+        if (entry) entry.generationAtStart = this.l1Cache.getGeneration(storeName);
       }
     } catch (err) {
       // 7. Error handling: rollback optimistic overlays and reject callers
@@ -403,9 +485,7 @@ export class WriteCoalescer {
       for (const op of healthyOps) {
         if (op.optimistic && op.key !== undefined) {
           const entry = this.l1Cache.getEntry(`record:${storeName}:${toKeyString(op.key)}`);
-          if (entry) {
-            this.l1Cache.rollbackOptimistic(entry);
-          }
+          if (entry) this.l1Cache.rollbackMutations(entry, op.mutationIds);
         }
         for (const rej of op.rejecters) {
           rej(error);
@@ -423,6 +503,7 @@ export class WriteCoalescer {
    * Executes a direct batch write routed through middleware and cache invalidation.
    */
   async batch(storeName: string, ops: StorageBatchOp[]): Promise<(IDBValidKey | undefined)[]> {
+    if (ops.length === 0) return [];
     const transformedOps: StorageBatchOp[] = [];
 
     for (const op of ops) {
@@ -437,7 +518,6 @@ export class WriteCoalescer {
     }
 
     const results = await this.storage.batch(storeName, transformedOps);
-    this.l1Cache.incrementGeneration(storeName);
 
     const affectedKeys: IDBValidKey[] = [];
     for (let i = 0; i < ops.length; i++) {
@@ -445,22 +525,30 @@ export class WriteCoalescer {
       if (resKey !== undefined) affectedKeys.push(resKey);
     }
 
-    const envelope: MutationEnvelope = {
-      originTabId: this.syncPort.tabId,
-      timestamp: Date.now(),
-      storeName,
-      operation: ops.length > 1 ? "bulk" : (ops[0]!.type as "put" | "delete"),
-      affectedKeys,
-    };
-
-    if (this.dependencyTracker) {
-      this.l1Cache.invalidateMatching((entry) => this.dependencyTracker!.shouldInvalidate(entry, envelope));
+    if (this.mutationCoordinator) {
+      this.mutationCoordinator.afterStoreCommit({
+        storeName,
+        operation: ops.length > 1 ? "bulk" : (ops[0]!.type as "put" | "delete"),
+        affectedKeys,
+      });
     } else {
-      this.l1Cache.invalidateByStore(storeName);
-    }
-
-    if (affectedKeys.length > 0) {
-      this.syncPort.publish(envelope);
+      this.l1Cache.incrementGeneration(storeName);
+      const envelope: MutationEnvelope = {
+        version: 1,
+        originTabId: this.syncPort.tabId,
+        timestamp: Date.now(),
+        storeName,
+        operation: ops.length > 1 ? "bulk" : (ops[0]!.type as "put" | "delete"),
+        affectedKeys,
+      };
+      if (this.dependencyTracker) {
+        this.l1Cache.invalidateMatching((entry) =>
+          this.dependencyTracker!.shouldInvalidate(entry, envelope),
+        );
+      } else {
+        this.l1Cache.invalidateByStore(storeName);
+      }
+      if (affectedKeys.length > 0) this.publishSafely(envelope);
     }
 
     return results;

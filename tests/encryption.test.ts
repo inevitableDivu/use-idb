@@ -10,19 +10,18 @@ import {
 
 describe("Encryption Middleware & Cryptographic Hardening", () => {
   async function generateAesKey(): Promise<CryptoKey> {
-    return await crypto.subtle.generateKey(
-      { name: "AES-GCM", length: 256 },
-      true,
-      ["encrypt", "decrypt"],
-    );
+    return await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
+      "encrypt",
+      "decrypt",
+    ]);
   }
 
   it("encrypts and decrypts deep nested field paths", async () => {
     const key = await generateAesKey();
-    const middleware = createEncryptionMiddleware(
-      key,
-      ["profile.secret.ssn", "financial.accountNumber"],
-    );
+    const middleware = createEncryptionMiddleware(key, [
+      "profile.secret.ssn",
+      "financial.accountNumber",
+    ]);
 
     const original = {
       id: "rec_1",
@@ -37,7 +36,12 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
       },
     };
 
-    const writeCtx = { storeName: "users", operation: "put" as const, key: "rec_1", value: original };
+    const writeCtx = {
+      storeName: "users",
+      operation: "put" as const,
+      key: "rec_1",
+      value: original,
+    };
     const encrypted = (await middleware.beforeWrite?.(writeCtx)) as typeof original & {
       profile: { secret: { ssn: { __encrypted: boolean } } };
     };
@@ -239,7 +243,12 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
     const key = await generateAesKey();
     const middleware = createEncryptionMiddleware(key, ["secret"]);
 
-    const writeCtx = { storeName: "vault_a", operation: "put" as const, key: "key_1", value: { id: "key_1", secret: "classified" } };
+    const writeCtx = {
+      storeName: "vault_a",
+      operation: "put" as const,
+      key: "key_1",
+      value: { id: "key_1", secret: "classified" },
+    };
     const encrypted = (await middleware.beforeWrite?.(writeCtx)) as any;
 
     // Legitimate read succeeds

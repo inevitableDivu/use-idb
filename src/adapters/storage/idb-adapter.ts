@@ -1,7 +1,12 @@
 import type { DatabaseSchema } from "../../types/schema";
 import type { ConnectionState, StorageQuota } from "../../types/status";
 import type { QueryAST } from "../../types/query";
-import type { IStoragePort, IStorageTransaction, StorageBatchOp, StorageEntry } from "../../ports/storage.port";
+import type {
+  IStoragePort,
+  IStorageTransaction,
+  StorageBatchOp,
+  StorageEntry,
+} from "../../ports/storage.port";
 import type { ILockPort } from "../../ports/lock.port";
 import type { ISyncPort } from "../../ports/sync.port";
 import { runMigrations } from "./migration-runner";
@@ -19,6 +24,19 @@ export class DatabaseClosingForUpgradeError extends Error {
   }
 }
 
+export class DatabaseMigrationError extends Error {
+  readonly cause: unknown;
+
+  constructor(databaseName: string, oldVersion: number, newVersion: number, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `Failed to upgrade database "${databaseName}" from version ${oldVersion} to ${newVersion}: ${detail}`,
+    );
+    this.name = "DatabaseMigrationError";
+    this.cause = cause;
+  }
+}
+
 /**
  * Robust IndexedDB storage adapter implementing {@link IStoragePort}.
  *
@@ -26,6 +44,7 @@ export class DatabaseClosingForUpgradeError extends Error {
  * immediate operation rejection during remote upgrades, and zero-leak transaction management.
  */
 export class IndexedDBStorageAdapter implements IStoragePort {
+  readonly kind = "indexeddb" as const;
   private db: IDBDatabase | null = null;
   private state: ConnectionState = "IDLE";
   private stateListeners = new Set<(state: ConnectionState) => void>();
@@ -102,7 +121,10 @@ export class IndexedDBStorageAdapter implements IStoragePort {
     if (this.state === "CLOSING_FOR_UPGRADE" || this._requiresReload) {
       throw new DatabaseClosingForUpgradeError();
     }
-    if (this.state === "OPEN" && this.db) return;
+    if (this.db && (this.state === "OPEN" || this.state === "QUOTA_EXCEEDED")) {
+      if (this.state === "QUOTA_EXCEEDED") this.setState("OPEN");
+      return;
+    }
 
     // Deduplicate concurrent open() calls
     if (this.openPromise) return this.openPromise;
@@ -151,7 +173,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
           } catch {
             // Already aborted
           }
-          reject(err);
+          reject(new DatabaseMigrationError(this.schema.name, oldVersion, newVersion, err));
         }
       };
 
@@ -161,13 +183,18 @@ export class IndexedDBStorageAdapter implements IStoragePort {
 
         // REL-06: Broadcast force release request so older tabs close their handles
         if (this.syncPort) {
-          this.syncPort.publish({
-            originTabId: this.syncPort.tabId,
-            timestamp: Date.now(),
-            storeName: "*",
-            operation: "force_release",
-            affectedKeys: [],
-          });
+          try {
+            this.syncPort.publish({
+              version: 1,
+              originTabId: this.syncPort.tabId,
+              timestamp: Date.now(),
+              storeName: "*",
+              operation: "force_release",
+              affectedKeys: [],
+            });
+          } catch {
+            // A failed advisory notification must not disrupt the database's blocked state.
+          }
         }
       };
 
@@ -222,17 +249,25 @@ export class IndexedDBStorageAdapter implements IStoragePort {
     this.setState("IDLE");
   }
 
+  /** Ask the browser to persist this origin's storage; this is advisory and may be denied. */
+  async requestPersistentStorage(): Promise<boolean> {
+    if (typeof navigator === "undefined" || !navigator.storage?.persist) return false;
+    return navigator.storage.persist().catch(() => false);
+  }
+
   // ── Safari Auto-Healing & Contention Guards ──
 
-  private async executeWithRetry<T>(fn: (db: IDBDatabase) => Promise<T>): Promise<T> {
+  private async executeWithRetry<T>(fn: (db: IDBDatabase) => Promise<T>, retry = true): Promise<T> {
     await this.ensureOpen();
     try {
       return await fn(this.db!);
     } catch (err) {
       if (err instanceof DOMException && err.name === "QuotaExceededError") {
-        this.setState("QUOTA_EXCEEDED" as any);
+        this.setState("QUOTA_EXCEEDED");
         throw err;
       }
+      // Never replay a user-supplied transaction callback: it may have side effects outside IndexedDB.
+      if (!retry) throw err;
       if (err instanceof DOMException && RETRY_ERRORS.includes(err.name)) {
         // Safari zombie connection: purge and retry once
         this.db?.close();
@@ -330,7 +365,8 @@ export class IndexedDBStorageAdapter implements IStoragePort {
 
           req.onerror = () => reject(req.error);
           tx.onerror = () => reject(tx.error);
-          tx.onabort = () => reject(tx.error ?? new DOMException("Read transaction aborted", "AbortError"));
+          tx.onabort = () =>
+            reject(tx.error ?? new DOMException("Read transaction aborted", "AbortError"));
         }),
     );
   }
@@ -347,8 +383,21 @@ export class IndexedDBStorageAdapter implements IStoragePort {
               : key !== undefined
                 ? store.put(value, key)
                 : store.put(value);
-          req.onsuccess = () => resolve(req.result);
+          let resultKey: IDBValidKey | undefined;
+          req.onsuccess = () => {
+            resultKey = req.result;
+          };
           req.onerror = () => reject(req.error);
+          tx.oncomplete = () => {
+            if (resultKey !== undefined) resolve(resultKey);
+            else
+              reject(
+                new DOMException("Write transaction completed without a key.", "UnknownError"),
+              );
+          };
+          tx.onerror = () => reject(tx.error ?? req.error);
+          tx.onabort = () =>
+            reject(tx.error ?? new DOMException("Write transaction aborted.", "AbortError"));
         }),
     );
   }
@@ -359,8 +408,11 @@ export class IndexedDBStorageAdapter implements IStoragePort {
         new Promise<void>((resolve, reject) => {
           const tx = db.transaction(storeName, "readwrite");
           const req = tx.objectStore(storeName).delete(key);
-          req.onsuccess = () => resolve();
           req.onerror = () => reject(req.error);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error ?? req.error);
+          tx.onabort = () =>
+            reject(tx.error ?? new DOMException("Delete transaction aborted.", "AbortError"));
         }),
     );
   }
@@ -371,8 +423,11 @@ export class IndexedDBStorageAdapter implements IStoragePort {
         new Promise<void>((resolve, reject) => {
           const tx = db.transaction(storeName, "readwrite");
           const req = tx.objectStore(storeName).clear();
-          req.onsuccess = () => resolve();
           req.onerror = () => reject(req.error);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error ?? req.error);
+          tx.onabort = () =>
+            reject(tx.error ?? new DOMException("Clear transaction aborted.", "AbortError"));
         }),
     );
   }
@@ -408,7 +463,6 @@ export class IndexedDBStorageAdapter implements IStoragePort {
             const tx = db.transaction(storeName, "readwrite");
             const store = tx.objectStore(storeName);
             const results: (IDBValidKey | undefined)[] = [];
-            let completed = 0;
             const total = ops.length;
 
             if (total === 0) {
@@ -434,10 +488,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
               const idx = i;
               req.onsuccess = () => {
                 results[idx] = op.type === "put" ? (req.result as IDBValidKey) : undefined;
-                completed++;
-                if (completed === total) {
-                  resolve(results);
-                }
+                // Results are retained until the transaction-level commit event.
               };
 
               req.onerror = () => {
@@ -445,7 +496,9 @@ export class IndexedDBStorageAdapter implements IStoragePort {
               };
             }
 
-            tx.onerror = () => reject(tx.error);
+            tx.oncomplete = () => resolve(results);
+            tx.onerror = () =>
+              reject(tx.error ?? new DOMException("Batch transaction failed", "UnknownError"));
             tx.onabort = () =>
               reject(tx.error ?? new DOMException("Batch transaction aborted", "AbortError"));
           }),
@@ -506,7 +559,14 @@ export class IndexedDBStorageAdapter implements IStoragePort {
             put(storeName: string, value: unknown, key?: IDBValidKey): Promise<IDBValidKey> {
               return new Promise((res, rej) => {
                 const store = tx.objectStore(storeName);
-                const req = key !== undefined ? store.put(value, key) : store.put(value);
+                // Inline-key stores derive their key from the value; an explicit key is
+                // validated by Engine before this port is called and is not passed to IDB.
+                const req =
+                  store.keyPath !== null
+                    ? store.put(value)
+                    : key !== undefined
+                      ? store.put(value, key)
+                      : store.put(value);
                 req.onsuccess = () => res(req.result);
                 req.onerror = () => rej(req.error);
               });
@@ -547,20 +607,25 @@ export class IndexedDBStorageAdapter implements IStoragePort {
             },
           );
         }),
+      false,
     );
   }
 
   // ── Cursor / Query Engine (REA-05 Software Offset Filter) ──
 
-  async cursor<T>(ast: QueryAST<T>): Promise<T[]> {
-    return (await this.cursorWithKeys(ast)).map((entry) => entry.value);
+  async cursor<T>(ast: QueryAST<T>, signal?: AbortSignal): Promise<T[]> {
+    return (await this.cursorWithKeys(ast, signal)).map((entry) => entry.value);
   }
 
-  async cursorWithKeys<T>(ast: QueryAST<T>): Promise<StorageEntry<T>[]> {
+  async cursorWithKeys<T>(ast: QueryAST<T>, signal?: AbortSignal): Promise<StorageEntry<T>[]> {
+    if (signal?.aborted) {
+      throw new DOMException("The query was aborted.", "AbortError");
+    }
     if (ast.limitCount !== undefined && ast.limitCount <= 0) return [];
-    // Fast-path: no JS filter, direction='next', offset=0 -> native getAll.
+
+    // A signal requires a cancellable cursor transaction; the native getAll fast path can't abort.
     const canUseFastPath =
-      !ast.filterPredicate && ast.direction === "next" && ast.offsetCount === 0;
+      !signal && !ast.filterPredicate && ast.direction === "next" && ast.offsetCount === 0;
 
     if (canUseFastPath) {
       return this.getAllWithKeys<T>(ast.storeName, ast.indexName, ast.range, ast.limitCount);
@@ -569,27 +634,59 @@ export class IndexedDBStorageAdapter implements IStoragePort {
     return this.executeWithRetry(
       (db) =>
         new Promise<StorageEntry<T>[]>((resolve, reject) => {
+          if (signal?.aborted) {
+            reject(new DOMException("The query was aborted.", "AbortError"));
+            return;
+          }
+
           const tx = db.transaction(ast.storeName, "readonly");
           const source = ast.indexName
             ? tx.objectStore(ast.storeName).index(ast.indexName)
             : tx.objectStore(ast.storeName);
-
           const range = ast.range instanceof IDBKeyRange ? ast.range : (ast.range ?? null);
           const req = source.openCursor(range, ast.direction);
           const results: StorageEntry<T>[] = [];
           let skippedMatches = 0;
           let needsPhysicalAdvance = !ast.filterPredicate && ast.offsetCount > 0;
+          let settled = false;
+
+          const cleanup = () => signal?.removeEventListener("abort", onAbort);
+          const settle = (action: () => void) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            action();
+          };
+          const onAbort = () => {
+            try {
+              tx.abort();
+            } catch {
+              // The transaction may already have completed.
+            }
+            settle(() => reject(new DOMException("The query was aborted.", "AbortError")));
+          };
+
+          signal?.addEventListener("abort", onAbort, { once: true });
 
           req.onsuccess = () => {
+            if (signal?.aborted) {
+              onAbort();
+              return;
+            }
+
             const cursor = req.result;
             if (!cursor) {
-              resolve(results);
+              settle(() => resolve(results));
               return;
             }
 
             if (needsPhysicalAdvance) {
               needsPhysicalAdvance = false;
-              cursor.advance(ast.offsetCount);
+              try {
+                cursor.advance(ast.offsetCount);
+              } catch (error) {
+                settle(() => reject(error));
+              }
               return;
             }
 
@@ -611,14 +708,28 @@ export class IndexedDBStorageAdapter implements IStoragePort {
             }
 
             if (ast.limitCount !== undefined && results.length >= ast.limitCount) {
-              resolve(results);
+              settle(() => resolve(results));
               return;
             }
 
             cursor.continue();
           };
 
-          req.onerror = () => reject(req.error);
+          req.onerror = () => settle(() => reject(req.error));
+          tx.onabort = () =>
+            settle(() =>
+              reject(
+                signal?.aborted
+                  ? new DOMException("The query was aborted.", "AbortError")
+                  : (tx.error ?? new DOMException("Query transaction aborted.", "AbortError")),
+              ),
+            );
+          tx.onerror = () => {
+            if (!settled)
+              settle(() =>
+                reject(tx.error ?? new DOMException("Query transaction failed.", "UnknownError")),
+              );
+          };
         }),
     );
   }
@@ -634,8 +745,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
         usage !== null && quota !== null && quota > 0
           ? Math.round((usage / quota) * 1000) / 10
           : null;
-      const isPersisted =
-        navigator.storage.persisted ? await navigator.storage.persisted() : null;
+      const isPersisted = navigator.storage.persisted ? await navigator.storage.persisted() : null;
 
       return {
         usageBytes: usage,

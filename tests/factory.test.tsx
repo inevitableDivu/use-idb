@@ -1,10 +1,6 @@
 import { describe, it, expect, expectTypeOf } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import {
-  createDatabase,
-  createDatabaseHooks,
-  store,
-} from "../src";
+import { createDatabase, createDatabaseHooks, store } from "../src";
 
 describe("createDatabaseHooks Factory", () => {
   interface Article {
@@ -34,9 +30,7 @@ describe("createDatabaseHooks Factory", () => {
     );
 
     const { result: liveQueryResult } = renderHook(() =>
-      hooks.useLiveQuery((queryDb) =>
-        queryDb.query("articles").where("views").gte(50).toArray(),
-      ),
+      hooks.useLiveQuery((queryDb) => queryDb.query("articles").where("views").gte(50).toArray()),
     );
     expectTypeOf(liveQueryResult.current.data).toEqualTypeOf<Article[] | undefined>();
 

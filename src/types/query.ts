@@ -1,11 +1,7 @@
 /**
  * Direction for IDBCursor traversal.
  */
-import type {
-  IndexInput,
-  InferIndexValue,
-  StringKeyOf,
-} from "./schema";
+import type { IndexInput, InferIndexValue, StringKeyOf } from "./schema";
 
 export type SortDirection = "asc" | "desc";
 
@@ -16,7 +12,16 @@ export type CursorDirection = "next" | "nextunique" | "prev" | "prevunique";
  */
 export type QueryFilterPredicate<T> = (record: T) => boolean;
 
-export type ResolveWhereValue<TItem extends object, TStore, K extends string> = K extends keyof TItem
+/** Context supplied to live query callbacks for cooperative cancellation of custom async work. */
+export interface QueryExecutionContext {
+  readonly signal: AbortSignal;
+}
+
+export type ResolveWhereValue<
+  TItem extends object,
+  TStore,
+  K extends string,
+> = K extends keyof TItem
   ? TItem[K]
   : TStore extends { readonly $types: { readonly indexes: infer TIndexes } }
     ? K extends keyof TIndexes
@@ -40,19 +45,42 @@ export interface WhereClause<TItem extends object, TStore, TValue, TResult = TIt
   gte(value: TValue): QueryBuilder<TItem, TStore, TResult>;
   lt(value: TValue): QueryBuilder<TItem, TStore, TResult>;
   lte(value: TValue): QueryBuilder<TItem, TStore, TResult>;
-  between(lower: TValue, upper: TValue, includeLower?: boolean, includeUpper?: boolean): QueryBuilder<TItem, TStore, TResult>;
+  between(
+    lower: TValue,
+    upper: TValue,
+    includeLower?: boolean,
+    includeUpper?: boolean,
+  ): QueryBuilder<TItem, TStore, TResult>;
   above(value: TValue, open?: boolean): QueryBuilder<TItem, TStore, TResult>;
   below(value: TValue, open?: boolean): QueryBuilder<TItem, TStore, TResult>;
   startsWith(prefix: TValue extends string ? string : never): QueryBuilder<TItem, TStore, TResult>;
   direction(direction: CursorDirection): QueryBuilder<TItem, TStore, TResult>;
   filter(predicate: QueryFilterPredicate<TItem>): QueryBuilder<TItem, TStore, TResult>;
-  orderBy<K extends StringKeyOf<TItem>>(field: K, direction?: SortDirection): QueryBuilder<TItem, TStore, TResult>;
+  orderBy<K extends StringKeyOf<TItem>>(
+    field: K,
+    direction?: SortDirection,
+  ): QueryBuilder<TItem, TStore, TResult>;
   limit(count: number): QueryBuilder<TItem, TStore, TResult>;
   offset(count: number): QueryBuilder<TItem, TStore, TResult>;
-  select<K extends StringKeyOf<TItem>>(...fields: readonly K[]): QueryBuilder<TItem, TStore, Pick<TItem, K>>;
+  select<K extends StringKeyOf<TItem>>(
+    ...fields: readonly K[]
+  ): QueryBuilder<TItem, TStore, Pick<TItem, K>>;
   toArray(): Promise<TResult[]>;
   first(): Promise<TResult | undefined>;
   count(): Promise<number>;
+  /** Inspect the selected access path and any required JavaScript post-processing. */
+  explain(): {
+    readonly storeName: string;
+    readonly accessPath: "primary-key" | "index" | "object-store";
+    readonly indexName?: string;
+    readonly usesKeyRange: boolean;
+    readonly requiresPostFilter: boolean;
+    readonly requiresPostSort: boolean;
+    readonly sortField?: string;
+    readonly sortDirection?: SortDirection;
+    readonly pagination: "cursor" | "materialize-and-slice";
+    readonly projectionFields?: readonly string[];
+  };
 }
 
 export interface QueryBuilder<TItem extends object, TStore = unknown, TResult = TItem> {
@@ -70,10 +98,25 @@ export interface QueryBuilder<TItem extends object, TStore = unknown, TResult = 
   ): QueryBuilder<TItem, TStore, TResult>;
   limit(count: number): QueryBuilder<TItem, TStore, TResult>;
   offset(count: number): QueryBuilder<TItem, TStore, TResult>;
-  select<K extends StringKeyOf<TItem>>(...fields: readonly K[]): QueryBuilder<TItem, TStore, Pick<TItem, K>>;
+  select<K extends StringKeyOf<TItem>>(
+    ...fields: readonly K[]
+  ): QueryBuilder<TItem, TStore, Pick<TItem, K>>;
   toArray(): Promise<TResult[]>;
   first(): Promise<TResult | undefined>;
   count(): Promise<number>;
+  /** Inspect the selected access path and any required JavaScript post-processing. */
+  explain(): {
+    readonly storeName: string;
+    readonly accessPath: "primary-key" | "index" | "object-store";
+    readonly indexName?: string;
+    readonly usesKeyRange: boolean;
+    readonly requiresPostFilter: boolean;
+    readonly requiresPostSort: boolean;
+    readonly sortField?: string;
+    readonly sortDirection?: SortDirection;
+    readonly pagination: "cursor" | "materialize-and-slice";
+    readonly projectionFields?: readonly string[];
+  };
 }
 
 /**
@@ -173,4 +216,11 @@ export interface LiveQueryOptions<T = unknown> {
    * Explicit cache query key to disambiguate dynamic filter predicates or queries.
    */
   queryKey?: string;
+
+  /**
+   * Object stores read by an async/custom query that does not return QueryBuilder metadata.
+   * Supplying this skips dependency-discovery invocation of the callback, avoiding duplicate
+   * fetches or other work before the real execution. Such queries are invalidated at store level.
+   */
+  stores?: readonly string[];
 }

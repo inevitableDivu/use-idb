@@ -46,7 +46,11 @@ describe("Zombie Read Prevention (Race Condition Handling)", () => {
 
   it("ignores an old request error after a newer request succeeds", () => {
     const cache = new L1Cache();
-    const entry = cache.getOrCreateEntry<string>("record:users:error-race", ["users"], "error-race");
+    const entry = cache.getOrCreateEntry<string>(
+      "record:users:error-race",
+      ["users"],
+      "error-race",
+    );
     const oldRequest = cache.markPending(entry, ["users"]);
     const newRequest = cache.markPending(entry, ["users"]);
 

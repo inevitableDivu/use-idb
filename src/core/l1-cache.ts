@@ -44,10 +44,13 @@ export interface CacheEntry<T = unknown> {
   status: CacheEntryStatus;
   data: T | undefined;
   optimisticData?: T | typeof DELETED_SENTINEL;
+  optimisticHasValue?: boolean;
   optimisticOverlays?: Map<string, unknown>;
   retryCount?: number;
   error: Error | null;
   generationAtStart: number;
+  /** Per-store generations prevent cross-store reads from accepting stale results. */
+  generationByStoreAtStart?: Map<string, number>;
   /** Monotonic token used to discard out-of-order fetch results. */
   requestId: number;
   promise?: Promise<T>;
@@ -90,10 +93,11 @@ const DEFAULT_OPTIONS: L1CacheOptions = {
 
 function createSnapshot<T>(entry: CacheEntry<T>): QuerySnapshot<T> {
   let activeData: T | undefined = entry.data;
-  if (entry.optimisticData === DELETED_SENTINEL) {
-    activeData = undefined;
-  } else if (entry.optimisticData !== undefined) {
-    activeData = entry.optimisticData as T;
+  if (entry.optimisticHasValue) {
+    activeData =
+      entry.optimisticData === DELETED_SENTINEL
+        ? undefined
+        : (entry.optimisticData as T | undefined);
   }
 
   return Object.freeze({
@@ -119,7 +123,17 @@ export class L1Cache {
   private readonly options: L1CacheOptions;
 
   constructor(options?: Partial<L1CacheOptions>) {
-    this.options = { ...DEFAULT_OPTIONS, ...options };
+    // Forwarded optional schema values can be undefined; do not let them override defaults.
+    this.options = {
+      maxEntries: options?.maxEntries ?? DEFAULT_OPTIONS.maxEntries,
+      ttlMs: options?.ttlMs ?? DEFAULT_OPTIONS.ttlMs,
+    };
+    if (!Number.isSafeInteger(this.options.maxEntries) || this.options.maxEntries < 1) {
+      throw new RangeError("cache maxEntries must be a positive safe integer.");
+    }
+    if (!Number.isSafeInteger(this.options.ttlMs) || this.options.ttlMs < 0) {
+      throw new RangeError("cache ttlMs must be a non-negative safe integer.");
+    }
   }
 
   getGeneration(storeName: string): number {
@@ -133,7 +147,13 @@ export class L1Cache {
   }
 
   getEntry<T>(queryHash: string): CacheEntry<T> | undefined {
-    return this.entries.get(queryHash) as CacheEntry<T> | undefined;
+    const entry = this.entries.get(queryHash) as CacheEntry<T> | undefined;
+    if (entry) {
+      // Map insertion order is the eviction order, so touching an entry refreshes LRU recency.
+      this.entries.delete(queryHash);
+      this.entries.set(queryHash, entry);
+    }
+    return entry;
   }
 
   getOrCreateEntry<T>(
@@ -158,6 +178,7 @@ export class L1Cache {
         status: "idle",
         data: undefined,
         optimisticData: undefined,
+        optimisticHasValue: false,
         optimisticOverlays: new Map(),
         retryCount: 0,
         error: null,
@@ -174,6 +195,9 @@ export class L1Cache {
 
       this.entries.set(queryHash, entry as CacheEntry);
     } else {
+      // Refresh LRU recency for existing entries.
+      this.entries.delete(queryHash);
+      this.entries.set(queryHash, entry as CacheEntry);
       for (const s of storeNames) {
         entry.storeNames.add(s);
       }
@@ -192,7 +216,10 @@ export class L1Cache {
   markPending<T>(entry: CacheEntry<T>, storeNames: string[]): number {
     entry.requestId += 1;
     entry.status = "pending";
-    entry.generationAtStart = Math.max(...storeNames.map((s) => this.getGeneration(s)));
+    entry.generationByStoreAtStart = new Map(
+      storeNames.map((store) => [store, this.getGeneration(store)]),
+    );
+    entry.generationAtStart = Math.max(0, ...entry.generationByStoreAtStart.values());
     this.updateEntrySnapshot(entry);
     return entry.requestId;
   }
@@ -209,22 +236,27 @@ export class L1Cache {
    */
   resolve<T>(entry: CacheEntry<T>, data: T, requestId?: number): boolean {
     if (requestId !== undefined && requestId !== entry.requestId) return false;
-    const currentMaxGen = Math.max(
-      ...Array.from(entry.storeNames).map((s) => this.getGeneration(s)),
+    const stale = Array.from(entry.storeNames).some(
+      (store) =>
+        this.getGeneration(store) >
+        (entry.generationByStoreAtStart?.get(store) ?? entry.generationAtStart),
     );
 
-    if (currentMaxGen > entry.generationAtStart) {
-      // Stale read detected — auto re-fetch if fetcher is available
+    if (stale) {
+      // Stale read detected — auto re-fetch if a fetcher is available.
       const retryCount = (entry.retryCount ?? 0) + 1;
       entry.retryCount = retryCount;
       if (entry.fetcher && retryCount <= 3) {
-        entry.generationAtStart = currentMaxGen;
+        entry.generationByStoreAtStart = new Map(
+          Array.from(entry.storeNames, (store) => [store, this.getGeneration(store)]),
+        );
+        entry.generationAtStart = Math.max(0, ...entry.generationByStoreAtStart.values());
         entry.fetcher().catch((err) => {
           this.reject(entry, err instanceof Error ? err : new Error(String(err)));
         });
       } else {
-        // Exceeded retries, mark resolved with current state
-        entry.status = "resolved";
+        // Keep the entry idle so the next subscriber/read can retry instead of presenting stale data as resolved.
+        entry.status = "idle";
         this.updateEntrySnapshot(entry);
       }
       return false;
@@ -245,6 +277,15 @@ export class L1Cache {
     this.updateEntrySnapshot(entry);
   }
 
+  /** Cancel an in-flight read without replacing newer requests for the same cache entry. */
+  cancel<T>(entry: CacheEntry<T>, requestId?: number): void {
+    if (requestId !== undefined && requestId !== entry.requestId) return;
+    entry.status = "idle";
+    entry.error = null;
+    entry.promise = undefined;
+    this.updateEntrySnapshot(entry);
+  }
+
   setPromise(queryHash: string, promise: Promise<unknown>): void {
     const entry = this.entries.get(queryHash);
     if (entry) {
@@ -258,15 +299,42 @@ export class L1Cache {
 
   /**
    * Apply an optimistic overlay before the transaction commits.
+   * Mutation IDs allow one failed write to roll back without erasing newer writes.
    */
-  setOptimistic<T>(entry: CacheEntry<T>, data: T | typeof DELETED_SENTINEL, mutationId?: string): void {
+  setOptimistic<T>(
+    entry: CacheEntry<T>,
+    data: T | typeof DELETED_SENTINEL,
+    mutationId?: string,
+  ): void {
     if (mutationId) {
-      if (!entry.optimisticOverlays) {
-        entry.optimisticOverlays = new Map();
-      }
+      if (!entry.optimisticOverlays) entry.optimisticOverlays = new Map();
       entry.optimisticOverlays.set(mutationId, data);
+      this.refreshOptimisticOverlay(entry);
+    } else {
+      entry.optimisticData = data as any;
+      entry.optimisticHasValue = true;
     }
-    entry.optimisticData = data as any;
+    this.updateEntrySnapshot(entry);
+  }
+
+  /** Commit a group of coalesced mutations while preserving overlays from newer batches. */
+  commitMutations<T>(
+    entry: CacheEntry<T>,
+    mutationIds: readonly string[],
+    committedData: T | undefined,
+  ): void {
+    entry.data = committedData;
+    for (const mutationId of mutationIds) entry.optimisticOverlays?.delete(mutationId);
+    this.refreshOptimisticOverlay(entry);
+    entry.status = "resolved";
+    entry.error = null;
+    this.updateEntrySnapshot(entry);
+  }
+
+  /** Remove only the specified optimistic writes; retain any later active overlays. */
+  rollbackMutations<T>(entry: CacheEntry<T>, mutationIds: readonly string[]): void {
+    for (const mutationId of mutationIds) entry.optimisticOverlays?.delete(mutationId);
+    this.refreshOptimisticOverlay(entry);
     this.updateEntrySnapshot(entry);
   }
 
@@ -274,35 +342,50 @@ export class L1Cache {
    * Commit the optimistic overlay (transaction succeeded).
    */
   commitOptimistic<T>(entry: CacheEntry<T>, mutationId?: string): void {
-    if (mutationId && entry.optimisticOverlays) {
-      entry.optimisticOverlays.delete(mutationId);
-    }
-    if (entry.optimisticData === DELETED_SENTINEL) {
-      entry.data = undefined;
-      entry.optimisticData = undefined;
+    if (mutationId) {
+      const committed = entry.optimisticOverlays?.get(mutationId);
+      entry.optimisticOverlays?.delete(mutationId);
+      if (committed === DELETED_SENTINEL) entry.data = undefined;
+      else if (committed !== undefined) entry.data = committed as T;
+      this.refreshOptimisticOverlay(entry);
       this.updateEntrySnapshot(entry);
-    } else if (entry.optimisticData !== undefined) {
-      entry.data = entry.optimisticData as T;
-      entry.optimisticData = undefined;
-      this.updateEntrySnapshot(entry);
+      return;
     }
+    if (entry.optimisticHasValue) {
+      entry.data =
+        entry.optimisticData === DELETED_SENTINEL
+          ? undefined
+          : (entry.optimisticData as T | undefined);
+    }
+    entry.optimisticData = undefined;
+    entry.optimisticHasValue = false;
+    this.updateEntrySnapshot(entry);
   }
 
   /**
    * Rollback the optimistic overlay (transaction aborted).
    */
   rollbackOptimistic<T>(entry: CacheEntry<T>, mutationId?: string): void {
-    if (mutationId && entry.optimisticOverlays) {
-      entry.optimisticOverlays.delete(mutationId);
-      if (entry.optimisticOverlays.size > 0) {
-        const remaining = Array.from(entry.optimisticOverlays.values());
-        entry.optimisticData = remaining[remaining.length - 1] as any;
-        this.updateEntrySnapshot(entry);
-        return;
-      }
+    if (mutationId) {
+      entry.optimisticOverlays?.delete(mutationId);
+      this.refreshOptimisticOverlay(entry);
+    } else {
+      entry.optimisticData = undefined;
+      entry.optimisticHasValue = false;
+    }
+    this.updateEntrySnapshot(entry);
+  }
+
+  private refreshOptimisticOverlay<T>(entry: CacheEntry<T>): void {
+    const overlays = entry.optimisticOverlays;
+    if (overlays && overlays.size > 0) {
+      const latest = Array.from(overlays.values()).at(-1);
+      entry.optimisticData = latest as T | typeof DELETED_SENTINEL;
+      entry.optimisticHasValue = true;
+      return;
     }
     entry.optimisticData = undefined;
-    this.updateEntrySnapshot(entry);
+    entry.optimisticHasValue = false;
   }
 
   subscribe(queryHash: string, listener: () => void, fetcher?: () => Promise<unknown>): () => void {

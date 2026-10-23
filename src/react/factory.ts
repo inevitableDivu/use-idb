@@ -4,13 +4,8 @@ import {
   type UseRecordOptions,
   type UseRecordResult,
 } from "./use-record";
-import {
-  useLiveQuery as useLiveQueryUntyped,
-  type UseLiveQueryResult,
-} from "./use-live-query";
-import {
-  useMutation as useMutationUntyped,
-} from "./use-mutation";
+import { useLiveQuery as useLiveQueryUntyped, type UseLiveQueryResult } from "./use-live-query";
+import { useMutation as useMutationUntyped } from "./use-mutation";
 import { useIDBStatus as useIDBStatusUntyped } from "./use-idb-status";
 import type { DatabaseSchema, StoreNames, StoreValue, StoreKey } from "../types/schema";
 import type { Engine } from "../core/engine";
@@ -98,12 +93,10 @@ export function createDatabaseHooks<TSchema extends DatabaseSchema<any> = Databa
       const mutation = useMutationUntyped(engine);
       return {
         ...mutation,
-        put: (
-          value: Item<K>,
-          key?: Key<K>,
-          options?: { optimistic?: boolean },
-        ): Promise<Key<K>> =>
-          mutation.put(storeName, value, key as IDBValidKey | undefined, options) as Promise<Key<K>>,
+        put: (value: Item<K>, key?: Key<K>, options?: { optimistic?: boolean }): Promise<Key<K>> =>
+          mutation.put(storeName, value, key as IDBValidKey | undefined, options) as Promise<
+            Key<K>
+          >,
         bulkPut: (
           items: Array<{ key?: Key<K>; value: Item<K> }>,
           options?: { chunkSize?: number },

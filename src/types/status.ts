@@ -11,7 +11,8 @@ export type ConnectionState =
   | "CLOSING_FOR_UPGRADE"
   | "RECONNECTING"
   | "FALLBACK_MEMORY"
-  | "ERROR";
+  | "ERROR"
+  | "QUOTA_EXCEEDED";
 
 /**
  * Storage quota telemetry retrieved from `navigator.storage.estimate()`.
@@ -51,6 +52,11 @@ export interface IDBStatusSnapshot {
    * `true` if operating on the In-Memory storage adapter fallback (e.g. private browsing).
    */
   isFallbackMode: boolean;
+  /** Why the engine selected in-memory storage, or null when IndexedDB is active. */
+  fallbackReason: string | null;
+
+  /** Whether a persistent-storage request was explicitly made and its result, or null when not requested/unsupported. */
+  persistentStorageGranted: boolean | null;
 
   /**
    * `true` if a schema upgrade is blocked by another tab keeping an older database connection open.
@@ -68,7 +74,12 @@ export interface IDBStatusSnapshot {
   quota: StorageQuota;
 
   /**
-   * Method to close and re-establish the database connection.
+   * Re-estimate quota and refresh the current persistence grant state.
+   */
+  refreshQuota: () => Promise<StorageQuota>;
+
+  /**
+   * Method to close and re-establish the selected storage connection.
    */
   reconnect: () => Promise<void>;
 }

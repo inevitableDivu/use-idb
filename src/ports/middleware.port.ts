@@ -27,6 +27,13 @@ export interface IDBMiddleware {
   name: string;
 
   /**
+   * Optional field paths transformed in persisted records. The engine uses this metadata to
+   * reject encryption/serialization that would break primary-key or secondary-index lookups.
+   * Adapters that cannot declare affected fields may omit it.
+   */
+  readonly transformedFieldPaths?: readonly string[];
+
+  /**
    * Intercepts a record value immediately before it is written to storage.
    * Useful for field-level encryption, schema validation, data serialization, etc.
    *
