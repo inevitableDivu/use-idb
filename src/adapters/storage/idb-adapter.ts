@@ -1,7 +1,7 @@
 import type { DatabaseSchema } from "../../types/schema";
 import type { ConnectionState, StorageQuota } from "../../types/status";
 import type { QueryAST } from "../../types/query";
-import type { IStoragePort, IStorageTransaction, StorageBatchOp } from "../../ports/storage.port";
+import type { IStoragePort, IStorageTransaction, StorageBatchOp, StorageEntry } from "../../ports/storage.port";
 import type { ILockPort } from "../../ports/lock.port";
 import type { ISyncPort } from "../../ports/sync.port";
 import { runMigrations } from "./migration-runner";
@@ -290,6 +290,51 @@ export class IndexedDBStorageAdapter implements IStoragePort {
     );
   }
 
+  async getAllWithKeys<T>(
+    storeName: string,
+    indexName?: string,
+    range?: IDBKeyRange | IDBValidKey,
+    limit?: number,
+  ): Promise<StorageEntry<T>[]> {
+    if (limit !== undefined && limit <= 0) return Promise.resolve([]);
+    return this.executeWithRetry(
+      (db) =>
+        new Promise<StorageEntry<T>[]>((resolve, reject) => {
+          const tx = db.transaction(storeName, "readonly");
+          const objectStore = tx.objectStore(storeName);
+          const source = indexName ? objectStore.index(indexName) : objectStore;
+          const keyRange = range instanceof IDBKeyRange ? range : (range ?? null);
+          const req = source.openCursor(keyRange);
+          const results: StorageEntry<T>[] = [];
+
+          req.onsuccess = () => {
+            const cursor = req.result;
+            if (!cursor) {
+              resolve(results);
+              return;
+            }
+
+            // For index cursors, cursor.key is the index key; primaryKey is
+            // the actual object-store key required by encryption AAD.
+            results.push({
+              key: cursor.primaryKey,
+              value: cursor.value as T,
+            });
+
+            if (limit !== undefined && results.length >= limit) {
+              resolve(results);
+              return;
+            }
+            cursor.continue();
+          };
+
+          req.onerror = () => reject(req.error);
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error ?? new DOMException("Read transaction aborted", "AbortError"));
+        }),
+    );
+  }
+
   async put(storeName: string, value: unknown, key?: IDBValidKey): Promise<IDBValidKey> {
     return this.executeWithRetry(
       (db) =>
@@ -508,17 +553,22 @@ export class IndexedDBStorageAdapter implements IStoragePort {
   // ── Cursor / Query Engine (REA-05 Software Offset Filter) ──
 
   async cursor<T>(ast: QueryAST<T>): Promise<T[]> {
-    // Fast-path: no JS filter, direction='next', offset=0 → native getAll
+    return (await this.cursorWithKeys(ast)).map((entry) => entry.value);
+  }
+
+  async cursorWithKeys<T>(ast: QueryAST<T>): Promise<StorageEntry<T>[]> {
+    if (ast.limitCount !== undefined && ast.limitCount <= 0) return [];
+    // Fast-path: no JS filter, direction='next', offset=0 -> native getAll.
     const canUseFastPath =
       !ast.filterPredicate && ast.direction === "next" && ast.offsetCount === 0;
 
     if (canUseFastPath) {
-      return this.getAll<T>(ast.storeName, ast.indexName, ast.range, ast.limitCount);
+      return this.getAllWithKeys<T>(ast.storeName, ast.indexName, ast.range, ast.limitCount);
     }
 
     return this.executeWithRetry(
       (db) =>
-        new Promise<T[]>((resolve, reject) => {
+        new Promise<StorageEntry<T>[]>((resolve, reject) => {
           const tx = db.transaction(ast.storeName, "readonly");
           const source = ast.indexName
             ? tx.objectStore(ast.storeName).index(ast.indexName)
@@ -526,7 +576,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
 
           const range = ast.range instanceof IDBKeyRange ? ast.range : (ast.range ?? null);
           const req = source.openCursor(range, ast.direction);
-          const results: T[] = [];
+          const results: StorageEntry<T>[] = [];
           let skippedMatches = 0;
           let needsPhysicalAdvance = !ast.filterPredicate && ast.offsetCount > 0;
 
@@ -537,26 +587,27 @@ export class IndexedDBStorageAdapter implements IStoragePort {
               return;
             }
 
-            // Zero-allocation skip ONLY when no filter predicate is present
             if (needsPhysicalAdvance) {
               needsPhysicalAdvance = false;
               cursor.advance(ast.offsetCount);
               return;
             }
 
-            const value = cursor.value as T;
+            const entry: StorageEntry<T> = {
+              key: cursor.primaryKey,
+              value: cursor.value as T,
+            };
 
-            // REA-05: Software-side offset counting after filter evaluation
             if (ast.filterPredicate) {
-              if (ast.filterPredicate(value)) {
+              if (ast.filterPredicate(entry.value)) {
                 if (skippedMatches < ast.offsetCount) {
                   skippedMatches++;
                 } else {
-                  results.push(value);
+                  results.push(entry);
                 }
               }
             } else {
-              results.push(value);
+              results.push(entry);
             }
 
             if (ast.limitCount !== undefined && results.length >= ast.limitCount) {

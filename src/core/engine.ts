@@ -288,11 +288,34 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
   async getAll<K extends StoreNames<TSchema>>(
     storeName: K,
   ): Promise<StoreValue<TSchema, K>[]> {
-    const results = await this.storage.getAll<StoreValue<TSchema, K>>(storeName);
+    const entries = this.storage.getAllWithKeys
+      ? await this.storage.getAllWithKeys<StoreValue<TSchema, K>>(storeName)
+      : (await this.storage.getAll<StoreValue<TSchema, K>>(storeName)).map((value) => {
+          const keyPath = this.schema.stores[storeName]?.keyPath;
+          let key: IDBValidKey | undefined;
+          if (keyPath !== undefined && value !== null && typeof value === "object") {
+            const paths: readonly string[] =
+              typeof keyPath === "string" ? [keyPath] : (keyPath as readonly string[]);
+            const parts = paths.map((path) => {
+              let current: unknown = value;
+              for (const part of path.split(".")) {
+                if (current === null || typeof current !== "object") return undefined;
+                current = (current as Record<string, unknown>)[part];
+              }
+              return current;
+            });
+            const candidate = Array.isArray(keyPath) ? parts : parts[0];
+            if (isValidKey(candidate)) key = candidate;
+          }
+          return { key, value };
+        });
+
     const transformed: StoreValue<TSchema, K>[] = [];
-    for (const value of results) {
+    for (const entry of entries) {
+      // Field-encryption middleware authenticates ciphertext against the primary key.
+      // Preserve the real key when the storage adapter can provide it.
       transformed.push(
-        (await this.middlewarePipeline.runAfterRead(storeName, value)) as StoreValue<TSchema, K>,
+        (await this.middlewarePipeline.runAfterRead(storeName, entry.value, entry.key)) as StoreValue<TSchema, K>,
       );
     }
     return transformed;

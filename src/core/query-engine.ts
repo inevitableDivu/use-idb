@@ -370,6 +370,9 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
    * @returns Current QueryBuilder for chaining.
    */
   offset(count: number): this {
+    if (!Number.isInteger(count) || count < 0) {
+      throw new RangeError("Query offset must be a non-negative integer.");
+    }
     this.ast.offsetCount = count;
     return this;
   }
@@ -381,6 +384,9 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
    * @returns Current QueryBuilder for chaining.
    */
   limit(count: number): this {
+    if (!Number.isInteger(count) || count < 0) {
+      throw new RangeError("Query limit must be a non-negative integer.");
+    }
     this.ast.limitCount = count;
     return this;
   }
@@ -404,6 +410,7 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
       ? { ...this.ast, offsetCount: 0, limitCount: undefined }
       : this.ast;
     let results: T[] = [];
+    let resultKeys: (IDBValidKey | undefined)[] = [];
     if (
       ast.primaryKeyLookup &&
       ast.primaryKeyValue !== undefined &&
@@ -411,15 +418,44 @@ export class QueryBuilder<T extends object, TStore = unknown, TResult = T>
       (ast.limitCount === undefined || ast.limitCount > 0)
     ) {
       const result = await this.storage.get<T>(ast.storeName, ast.primaryKeyValue);
-      if (result !== undefined) results.push(result);
+      if (result !== undefined) {
+        results.push(result);
+        resultKeys.push(ast.primaryKeyValue);
+      }
+    } else if (this.storage.cursorWithKeys) {
+      const entries = await this.storage.cursorWithKeys<T>(ast);
+      results = entries.map((entry) => entry.value);
+      resultKeys = entries.map((entry) => entry.key);
     } else {
       results = await this.storage.cursor(ast);
+      // Compatibility path for custom storage adapters that have not implemented
+      // key-aware reads yet. Inline and compound key paths remain supported.
+      const keyPath = this.storeConfig?.keyPath;
+      resultKeys = results.map((item) => {
+        if (keyPath === undefined || item === null || typeof item !== "object") return undefined;
+        const paths: readonly string[] =
+          typeof keyPath === "string" ? [keyPath] : (keyPath as readonly string[]);
+        const parts = paths.map((path) => {
+          let current: unknown = item;
+          for (const part of path.split(".")) {
+            if (current === null || typeof current !== "object") return undefined;
+            current = (current as Record<string, unknown>)[part];
+          }
+          return current;
+        });
+        const candidate = Array.isArray(keyPath) ? parts : parts[0];
+        return isValidKey(candidate) ? candidate : undefined;
+      });
     }
 
     if (this.middleware) {
       const transformed: T[] = [];
-      for (const item of results) {
-        const processed = await this.middleware.runAfterRead(this.ast.storeName, item);
+      for (let index = 0; index < results.length; index++) {
+        const processed = await this.middleware.runAfterRead(
+          this.ast.storeName,
+          results[index],
+          resultKeys[index],
+        );
         transformed.push(processed as T);
       }
       results = transformed;

@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  createDatabase,
   createEncryptionMiddleware,
   CryptographicContextUnavailableError,
+  MemoryStorageAdapter,
+  defaultSerializer,
+  store,
 } from "../src";
 
 describe("Encryption Middleware & Cryptographic Hardening", () => {
@@ -48,6 +52,187 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
     const decrypted = (await middleware.afterRead?.(readCtx)) as typeof original;
     expect(decrypted.profile.secret.ssn).toBe("123-45-6789");
     expect(decrypted.financial.accountNumber).toBe(987654321);
+  });
+
+  it("round-trips encrypted fields through engine get, getAll, and query reads", async () => {
+    interface SecretRecord {
+      id: string;
+      secret: string;
+      label: string;
+    }
+
+    const key = await generateAesKey();
+    const original: SecretRecord = {
+      id: "record-1",
+      secret: "private value",
+      label: "visible metadata",
+    };
+    const db = createDatabase(
+      {
+        name: `encrypted-read-regression-${Date.now()}-${Math.random()}`,
+        version: 1,
+        stores: {
+          records: store<SecretRecord>()({
+            keyPath: "id",
+            indexes: { by_label: { keyPath: "label" } },
+          }),
+          external: {},
+        },
+      },
+      {
+        storage: new MemoryStorageAdapter(),
+        middlewares: [createEncryptionMiddleware(key, ["secret"])],
+      },
+    );
+
+    await db.open();
+    try {
+      await db.put("records", original);
+
+      // The value persisted by the storage adapter must remain ciphertext at rest.
+      const persisted = (await db.storage.get("records", original.id)) as {
+        secret: { __encrypted?: boolean; ciphertext?: string };
+      };
+      expect(persisted.secret.__encrypted).toBe(true);
+      expect(persisted.secret.ciphertext).toBeTypeOf("string");
+
+      // Single-record, bulk, and query reads must all provide the same key AAD.
+      await expect(db.get("records", original.id)).resolves.toEqual(original);
+      await expect(db.getAll("records")).resolves.toEqual([original]);
+      await expect(db.query("records").toArray()).resolves.toEqual([original]);
+      await expect(
+        db.query("records").where("label").equals("visible metadata").toArray(),
+      ).resolves.toEqual([original]);
+
+      // Out-of-line stores must retain the actual storage key for middleware AAD too.
+      const externalOriginal = { secret: "external private value", label: "metadata" };
+      await db.put("external", externalOriginal, "external-1");
+      const externalPersisted = (await db.storage.get("external", "external-1")) as {
+        secret: { __encrypted?: boolean };
+      };
+      expect(externalPersisted.secret.__encrypted).toBe(true);
+      await expect(db.get("external", "external-1")).resolves.toEqual(externalOriginal);
+      await expect(db.getAll("external")).resolves.toEqual([externalOriginal]);
+      await expect(db.query("external").toArray()).resolves.toEqual([externalOriginal]);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  it("records wildcard AAD scope when a primary key is unavailable", async () => {
+    const key = await generateAesKey();
+    const middleware = createEncryptionMiddleware(key, ["secret"]);
+    const encrypted = (await middleware.beforeWrite?.({
+      storeName: "records",
+      operation: "put",
+      value: { secret: "generated-key-value" },
+    })) as { secret: { keyBound?: boolean } };
+
+    expect(encrypted.secret.keyBound).toBe(false);
+    const decrypted = (await middleware.afterRead?.({
+      storeName: "records",
+      key: 42,
+      value: encrypted,
+    })) as { secret: string };
+    expect(decrypted.secret).toBe("generated-key-value");
+  });
+
+  it("uses collision-resistant canonical key context for encryption AAD", async () => {
+    const key = await generateAesKey();
+    const middleware = createEncryptionMiddleware(key, ["secret"]);
+
+    const numericKeyRecord = await middleware.beforeWrite?.({
+      storeName: "records",
+      operation: "put",
+      key: 1,
+      value: { secret: "number-key" },
+    });
+    await expect(
+      middleware.afterRead?.({
+        storeName: "records",
+        key: "1",
+        value: numericKeyRecord,
+      }),
+    ).rejects.toThrow();
+
+    const compoundKeyRecord = await middleware.beforeWrite?.({
+      storeName: "records",
+      operation: "put",
+      key: ["a,b"],
+      value: { secret: "compound-key" },
+    });
+    await expect(
+      middleware.afterRead?.({
+        storeName: "records",
+        key: ["a", "b"],
+        value: compoundKeyRecord,
+      }),
+    ).rejects.toThrow();
+
+    // Two binary key views with the same visible bytes represent the same key.
+    const backing = new Uint8Array([9, 1, 2, 8]);
+    const viewKey = backing.subarray(1, 3);
+    const binaryRecord = await middleware.beforeWrite?.({
+      storeName: "records",
+      operation: "put",
+      key: viewKey,
+      value: { secret: "binary-key" },
+    });
+    const binaryRead = (await middleware.afterRead?.({
+      storeName: "records",
+      key: new Uint8Array([1, 2]),
+      value: binaryRecord,
+    })) as { secret: string };
+    expect(binaryRead.secret).toBe("binary-key");
+  });
+
+  it("continues decrypting legacy envelopes that use the old AAD key encoding", async () => {
+    const key = await generateAesKey();
+    const middleware = createEncryptionMiddleware(key, ["secret"]);
+
+    async function legacyEnvelope(value: string, aadKey: string) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const serialized = defaultSerializer.encode(value);
+      const plaintext = new Uint8Array(serialized.byteLength);
+      plaintext.set(serialized);
+      const aad = new TextEncoder().encode(`v1:records:${aadKey}:secret`);
+      const ciphertext = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv, additionalData: aad },
+        key,
+        plaintext,
+      );
+      const base64 = (bytes: Uint8Array) =>
+        btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
+
+      return {
+        __encrypted: true as const,
+        v: 1 as const,
+        keyId: "default",
+        iv: base64(iv),
+        ciphertext: base64(new Uint8Array(ciphertext)),
+      };
+    }
+
+    // Older key-bound record: key serialization was simply String(key).
+    const keyBoundLegacy = await legacyEnvelope("legacy-key-bound", "1");
+    await expect(
+      middleware.afterRead?.({
+        storeName: "records",
+        key: 1,
+        value: { secret: keyBoundLegacy },
+      }),
+    ).resolves.toEqual({ secret: "legacy-key-bound" });
+
+    // Older keyless write: legacy AAD used "*" and is still readable even if
+    // the adapter now knows the actual generated key at read time.
+    const keylessLegacy = await legacyEnvelope("legacy-keyless", "*");
+    await expect(
+      middleware.afterRead?.({
+        storeName: "records",
+        key: 99,
+        value: { secret: keylessLegacy },
+      }),
+    ).resolves.toEqual({ secret: "legacy-keyless" });
   });
 
   it("rejects ciphertext transposition across stores or keys via context-bound AAD", async () => {

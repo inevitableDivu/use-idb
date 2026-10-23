@@ -39,6 +39,15 @@ export interface EncryptedFieldEnvelope {
   keyId: string;
   iv: string; // base64
   ciphertext: string; // base64
+  /**
+   * Whether the primary key was available and bound into AAD at write time.
+   * Optional for backwards compatibility with envelopes created before this field existed.
+   */
+  keyBound?: boolean;
+  /**
+   * Key/AAD encoding version. Older v1 envelopes omit this and use legacy key encoding.
+   */
+  aadVersion?: 2;
 }
 
 /**
@@ -189,10 +198,50 @@ export function createEncryptionMiddleware(
     }
   }
 
-  function computeAad(storeName: string, key: IDBValidKey | undefined, fieldPath: string): Uint8Array<ArrayBuffer> {
-    const keyRepr = key !== undefined ? toKeyString(key) : "*";
+  /**
+ * Canonical, type-tagged representation of an IndexedDB key for AAD.
+ * JSON-encoding the tagged tree avoids collisions between e.g. number 1 and
+ * string "1", or compound keys whose string elements contain delimiters.
+ * Binary views encode only their visible byte range, not the backing buffer.
+ */
+function serializeAadKey(key: IDBValidKey): string {
+  const encode = (value: IDBValidKey): unknown => {
+    if (typeof value === "string") return ["string", value];
+    if (typeof value === "number") return ["number", Object.is(value, -0) ? 0 : value];
+    if (value instanceof Date) return ["date", value.getTime()];
+    if (Array.isArray(value)) return ["array", value.map((part) => encode(part))];
+    if (value instanceof ArrayBuffer) {
+      return ["binary", Array.from(new Uint8Array(value))];
+    }
+    if (ArrayBuffer.isView(value)) {
+      return [
+        "binary",
+        Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)),
+      ];
+    }
+    throw new TypeError("Unsupported IndexedDB key in encryption context.");
+  };
+  return JSON.stringify(encode(key));
+}
+
+function computeAad(storeName: string, key: IDBValidKey | undefined, fieldPath: string): Uint8Array<ArrayBuffer> {
+    const keyRepr = key !== undefined ? serializeAadKey(key) : "*";
     const aadStr = `v1:${storeName}:${keyRepr}:${fieldPath}`;
     const encoded = new TextEncoder().encode(aadStr);
+    const buffer = new ArrayBuffer(encoded.byteLength);
+    const aad = new Uint8Array(buffer);
+    aad.set(encoded);
+    return aad;
+  }
+
+  // Compatibility for envelopes created before canonical AAD key encoding was introduced.
+  function computeLegacyAad(
+    storeName: string,
+    key: IDBValidKey | undefined,
+    fieldPath: string,
+  ): Uint8Array<ArrayBuffer> {
+    const keyRepr = key !== undefined ? toKeyString(key) : "*";
+    const encoded = new TextEncoder().encode(`v1:${storeName}:${keyRepr}:${fieldPath}`);
     const buffer = new ArrayBuffer(encoded.byteLength);
     const aad = new Uint8Array(buffer);
     aad.set(encoded);
@@ -239,6 +288,8 @@ export function createEncryptionMiddleware(
           keyId: primaryKeyId,
           iv: toBase64(iv),
           ciphertext: toBase64(new Uint8Array(ciphertext)),
+          keyBound: ctx.key !== undefined,
+          aadVersion: 2,
         };
 
         setDeepProperty(record, field, envelope);
@@ -263,13 +314,38 @@ export function createEncryptionMiddleware(
 
         const iv = fromBase64(val.iv);
         const ciphertext = fromBase64(val.ciphertext);
-        const aad = computeAad(ctx.storeName, ctx.key, field);
 
-        const plaintext = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv, additionalData: aad },
-          decryptKey,
-          ciphertext,
-        );
+        // New envelopes record whether a key was present at write time. Keyless
+        // writes use store/field-scoped AAD ("*"); do not bind them to a generated
+        // key that did not exist when encryption ran.
+        let plaintext: ArrayBuffer;
+        const aadKey = val.keyBound === false ? undefined : ctx.key;
+        if (val.aadVersion === 2) {
+          plaintext = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv, additionalData: computeAad(ctx.storeName, aadKey, field) },
+            decryptKey,
+            ciphertext,
+          );
+        } else {
+          // Existing v1 envelopes used the old toKeyString() representation. Try
+          // the original key-bound AAD first, then the legacy wildcard form for
+          // records that were encrypted before their generated key was known.
+          const legacyKey = val.keyBound === false ? undefined : ctx.key;
+          try {
+            plaintext = await crypto.subtle.decrypt(
+              { name: "AES-GCM", iv, additionalData: computeLegacyAad(ctx.storeName, legacyKey, field) },
+              decryptKey,
+              ciphertext,
+            );
+          } catch (legacyKeyError) {
+            if (legacyKey === undefined) throw legacyKeyError;
+            plaintext = await crypto.subtle.decrypt(
+              { name: "AES-GCM", iv, additionalData: computeLegacyAad(ctx.storeName, undefined, field) },
+              decryptKey,
+              ciphertext,
+            );
+          }
+        }
 
         const decoded = serializer.decode(new Uint8Array(plaintext));
         setDeepProperty(record, field, decoded);
