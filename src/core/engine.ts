@@ -1,4 +1,4 @@
-import type { DatabaseSchema, StoreKey, StoreNames, StoreValue } from "../types/schema";
+import type { DatabaseSchema, StoreConfig, StoreKey, StoreNames, StoreValue } from "../types/schema";
 import type { IDBStatusSnapshot, StorageQuota } from "../types/status";
 import type { IStoragePort, IStorageTransaction, StorageBatchOp } from "../ports/storage.port";
 import type { ISyncPort } from "../ports/sync.port";
@@ -70,7 +70,7 @@ function schemaSignature(schema: DatabaseSchema<any>): string {
     .sort(([a], [b]) => Number(a) - Number(b))
     .map(([version, migration]) => [version, referenceId(migration)]);
   const stores = Object.fromEntries(
-    Object.entries(schema.stores)
+    Object.entries(schema.stores as Record<string, StoreConfig<any, any>>)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, store]) => [
         name,
@@ -78,7 +78,7 @@ function schemaSignature(schema: DatabaseSchema<any>): string {
           keyPath: store.keyPath ?? null,
           autoIncrement: store.autoIncrement ?? false,
           indexes: Object.fromEntries(
-            Object.entries(store.indexes ?? {})
+            Object.entries(store.indexes ?? {} as Record<string, import("../types/schema").IndexConfig<any>>)
               .sort(([a], [b]) => a.localeCompare(b))
               .map(([indexName, index]) => [
                 indexName,
