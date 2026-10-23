@@ -36,8 +36,8 @@ export function serializeKey(key: unknown): IDBValidKey {
 }
 
 /**
- * Safely converts any valid key or arbitrary key to a deterministic string
- * without triggering no-base-to-string lint warnings.
+ * Safely converts a key or arbitrary value to a deterministic string.
+ * Type tags preserve distinctions between different key types.
  */
 export function toKeyString(key: unknown): string {
   const encode = (value: unknown): unknown => {
@@ -52,6 +52,8 @@ export function toKeyString(key: unknown): string {
       if (value === -Infinity) return ["number", "-Infinity"];
       return ["number", value];
     }
+    if (typeof value === "bigint") return ["bigint", value.toString()];
+    if (typeof value === "symbol") return ["symbol", value.description ?? ""];
     if (value instanceof Date) return ["date", value.getTime()];
     if (value instanceof ArrayBuffer) return ["binary", Array.from(new Uint8Array(value))];
     if (ArrayBuffer.isView(value)) {
@@ -59,9 +61,15 @@ export function toKeyString(key: unknown): string {
     }
     if (Array.isArray(value)) return ["array", value.map(encode)];
     if (typeof value === "object") {
-      return ["object", Object.keys(value as object).sort().map((key) => [key, encode((value as Record<string, unknown>)[key])])];
+      return [
+        "object",
+        Object.keys(value)
+          .sort()
+          .map((propertyName) => [propertyName, encode((value as Record<string, unknown>)[propertyName])]),
+      ];
     }
-    return [typeof value, String(value)];
+    if (typeof value === "function") return ["function", value.name];
+    return ["unknown"];
   };
   return JSON.stringify(encode(key));
 }
