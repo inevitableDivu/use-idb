@@ -13,7 +13,13 @@ export type { UseMutationResult } from "./react/use-mutation";
 export { useIDBStatus } from "./react/use-idb-status";
 
 // ── Core Engine & Factories ──
-export { Engine, createDatabase, getDatabase, getDefaultEngine } from "./core/engine";
+export {
+  Engine,
+  createDatabase,
+  getDatabase,
+  getDefaultEngine,
+  DatabaseConfigurationConflictError,
+} from "./core/engine";
 export type { EngineConfig, DatabaseInstance } from "./core/engine";
 export { QueryBuilder } from "./core/query-engine";
 export { L1Cache, DELETED_SENTINEL } from "./core/l1-cache";
