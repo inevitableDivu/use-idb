@@ -178,7 +178,8 @@ export function useRecord<T extends object = Record<string, unknown>>(
       if (!isKeyDefined) throw new Error("Cannot set record with undefined key");
       const keyPath = engine.schema.stores[storeName]?.keyPath;
       if (keyPath !== undefined && val !== null && typeof val === "object") {
-        const paths = typeof keyPath === "string" ? [keyPath] : keyPath;
+        const paths: readonly string[] =
+          typeof keyPath === "string" ? [keyPath] : (keyPath as readonly string[]);
         const parts = paths.map((path) => {
           let current: unknown = val;
           for (const segment of path.split(".")) {
