@@ -1,5 +1,4 @@
 import type { IDBMiddleware } from "../../ports/middleware.port";
-import { toKeyString } from "../../core/key-serializer";
 import { defaultSerializer, type SerializationHook } from "./serializer";
 
 export class CryptographicContextUnavailableError extends Error {
@@ -240,7 +239,7 @@ function computeAad(storeName: string, key: IDBValidKey | undefined, fieldPath: 
     key: IDBValidKey | undefined,
     fieldPath: string,
   ): Uint8Array<ArrayBuffer> {
-    const keyRepr = key !== undefined ? toKeyString(key) : "*";
+    const keyRepr = key !== undefined ? String(key) : "*";
     const encoded = new TextEncoder().encode(`v1:${storeName}:${keyRepr}:${fieldPath}`);
     const buffer = new ArrayBuffer(encoded.byteLength);
     const aad = new Uint8Array(buffer);
