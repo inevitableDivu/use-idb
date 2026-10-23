@@ -181,14 +181,9 @@ export function useIdb<T>(key: string, options?: UseIdbOptions<T>): UseIdbReturn
   const setValue = useCallback(
     async (updater: T | ((prev: T | undefined) => T)) => {
       const performUpdate = async () => {
-        const currentVal =
-          snapshot.data !== undefined
-            ? snapshot.data
-            : options?.defaultValue !== undefined
-              ? options.defaultValue
-              : isFunctionUpdater(updater)
-                ? (await engine.get(storeName, key)) as T | undefined
-                : undefined;
+        const currentVal = isFunctionUpdater(updater)
+          ? ((await engine.get(storeName, key)) as T | undefined) ?? options?.defaultValue
+          : undefined;
         const nextVal = isFunctionUpdater(updater) ? updater(currentVal) : updater;
         await engine.put(storeName, nextVal, key, {
           optimistic: options?.optimistic ?? true,
