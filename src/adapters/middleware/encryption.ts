@@ -39,6 +39,11 @@ export interface EncryptedFieldEnvelope {
   keyId: string;
   iv: string; // base64
   ciphertext: string; // base64
+  /**
+   * Whether the primary key was available and bound into AAD at write time.
+   * Optional for backwards compatibility with envelopes created before this field existed.
+   */
+  keyBound?: boolean;
 }
 
 /**
@@ -239,6 +244,7 @@ export function createEncryptionMiddleware(
           keyId: primaryKeyId,
           iv: toBase64(iv),
           ciphertext: toBase64(new Uint8Array(ciphertext)),
+          keyBound: ctx.key !== undefined,
         };
 
         setDeepProperty(record, field, envelope);
@@ -263,13 +269,29 @@ export function createEncryptionMiddleware(
 
         const iv = fromBase64(val.iv);
         const ciphertext = fromBase64(val.ciphertext);
-        const aad = computeAad(ctx.storeName, ctx.key, field);
 
-        const plaintext = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv, additionalData: aad },
-          decryptKey,
-          ciphertext,
-        );
+        // New envelopes record whether a key was present at write time. Keyless
+        // writes use store/field-scoped AAD ("*"); do not bind them to a generated
+        // key that did not exist when encryption ran.
+        let plaintext: ArrayBuffer;
+        const aadKey = val.keyBound === false ? undefined : ctx.key;
+        try {
+          plaintext = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv, additionalData: computeAad(ctx.storeName, aadKey, field) },
+            decryptKey,
+            ciphertext,
+          );
+        } catch (error) {
+          // Compatibility with older v1 envelopes that did not persist keyBound:
+          // legacy writes without a known key used "*" and were previously readable
+          // from bulk/query paths where no key was passed to afterRead.
+          if (val.keyBound !== undefined || ctx.key === undefined) throw error;
+          plaintext = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv, additionalData: computeAad(ctx.storeName, undefined, field) },
+            decryptKey,
+            ciphertext,
+          );
+        }
 
         const decoded = serializer.decode(new Uint8Array(plaintext));
         setDeepProperty(record, field, decoded);
