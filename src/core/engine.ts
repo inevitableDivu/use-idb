@@ -203,7 +203,13 @@ export class Engine<TSchema extends DatabaseSchema<any> = DatabaseSchema<any>> {
     this.syncUnsubscribe = this.syncPort.subscribe((envelope) => {
       this.l1Cache.incrementGeneration(envelope.storeName);
       if (envelope.operation === "force_release") {
-        this.storage.close().catch(() => {});
+        if (
+          this.storage.requiresReloadForUpgrade() ||
+          this.storage.isUpgradeBlocked() ||
+          this.storage.getState() === "CLOSING_FOR_UPGRADE"
+        ) {
+          this.storage.close().catch(() => {});
+        }
         return;
       }
       this.l1Cache.invalidateMatching((entry) =>
