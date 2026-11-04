@@ -377,6 +377,28 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     expect(() => db.query("records")).toThrow(DatabaseDestroyedError);
   });
 
+  it("removes document visibilitychange listener on close", async () => {
+    let removed = false;
+    const originalRemove = document.removeEventListener;
+    document.removeEventListener = function (type: string, listener: any) {
+      if (type === "visibilitychange") removed = true;
+      return originalRemove.call(this, type, listener);
+    };
+
+    try {
+      const db = createDatabase({
+        name: `visibility-listener-cleanup-${Date.now()}`,
+        version: 1,
+        stores: { test: {} },
+      });
+      await db.close();
+      expect(removed).toBe(true);
+      await db.destroy();
+    } finally {
+      document.removeEventListener = originalRemove;
+    }
+  });
+
   it("enables IndexedDBStorageAdapter in Web Worker scopes when window is undefined", () => {
     const originalWindow = globalThis.window;
     try {

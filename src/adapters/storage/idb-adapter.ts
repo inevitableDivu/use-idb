@@ -53,6 +53,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
   private batchDrainResolvers: Array<() => void> = [];
   private _isUpgradeBlocked = false;
   private _requiresReload = false;
+  private visibilityListener: (() => void) | null = null;
 
   constructor(
     private readonly schema: DatabaseSchema,
@@ -65,7 +66,7 @@ export class IndexedDBStorageAdapter implements IStoragePort {
 
     // REL-07: Safari Visibility Heartbeat
     if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
-      document.addEventListener("visibilitychange", () => {
+      this.visibilityListener = () => {
         if (document.visibilityState === "visible" && this.state === "OPEN" && this.db) {
           try {
             const firstStore = this.schema.stores ? Object.keys(this.schema.stores)[0] : undefined;
@@ -80,7 +81,8 @@ export class IndexedDBStorageAdapter implements IStoragePort {
             this.open().catch(() => {});
           }
         }
-      });
+      };
+      document.addEventListener("visibilitychange", this.visibilityListener);
     }
   }
 
@@ -244,6 +246,10 @@ export class IndexedDBStorageAdapter implements IStoragePort {
   }
 
   async close(): Promise<void> {
+    if (this.visibilityListener && typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+      document.removeEventListener("visibilitychange", this.visibilityListener);
+      this.visibilityListener = null;
+    }
     this.db?.close();
     this.db = null;
     this.setState("IDLE");
