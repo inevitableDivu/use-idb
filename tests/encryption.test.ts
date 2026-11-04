@@ -359,6 +359,66 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
     expect(readV2.secret).toBe("created-with-v2");
   });
 
+  it("correctly executes in-memory query filters against decrypted plaintext", async () => {
+    interface SecretUser {
+      id: string;
+      role: string;
+      secretNotes: string;
+    }
+
+    const key = await generateAesKey();
+    const db = createDatabase(
+      {
+        name: `encrypted-filter-test-${Date.now()}-${Math.random()}`,
+        version: 1,
+        stores: {
+          users: store<SecretUser>()({
+            keyPath: "id",
+          }),
+        },
+      },
+      {
+        storage: new MemoryStorageAdapter(),
+        middlewares: [createEncryptionMiddleware(key, ["secretNotes"])],
+      },
+    );
+
+    await db.open();
+    try {
+      await db.put("users", { id: "u1", role: "admin", secretNotes: "alpha-token" });
+      await db.put("users", { id: "u2", role: "guest", secretNotes: "beta-token" });
+      await db.put("users", { id: "u3", role: "admin", secretNotes: "gamma-token" });
+
+      // In-memory filter on encrypted field
+      const alphaMatches = await db
+        .query("users")
+        .filter((u) => u.secretNotes.includes("alpha"))
+        .toArray();
+      expect(alphaMatches).toHaveLength(1);
+      expect(alphaMatches[0]?.id).toBe("u1");
+      expect(alphaMatches[0]?.secretNotes).toBe("alpha-token");
+
+      // Where on non-indexed encrypted field (evaluates as in-memory comparison predicate)
+      const betaMatches = await db
+        .query("users")
+        .where("secretNotes")
+        .equals("beta-token")
+        .toArray();
+      expect(betaMatches).toHaveLength(1);
+      expect(betaMatches[0]?.id).toBe("u2");
+      expect(betaMatches[0]?.secretNotes).toBe("beta-token");
+
+      // Count query with in-memory filter on encrypted field
+      const count = await db
+        .query("users")
+        .filter((u) => u.secretNotes.includes("token"))
+        .count();
+      expect(count).toBe(3);
+    } finally {
+      await db.destroy();
+    }
+  });
+
   it("fails closed with CryptographicContextUnavailableError when crypto.subtle is absent", async () => {
     const key = await generateAesKey();
     const originalSubtle = crypto.subtle;
