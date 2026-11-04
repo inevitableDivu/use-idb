@@ -32,11 +32,14 @@ export function createAdapterBundle(
       ? new WebLocksAdapter()
       : new NoopLockAdapter());
 
+  const isBrowserOrWorker =
+    typeof window !== "undefined" ||
+    (typeof self !== "undefined" && typeof (self as any).importScripts === "function") ||
+    (typeof globalThis !== "undefined" && "WorkerGlobalScope" in globalThis);
+
   let sync =
     config.adapters.sync ??
-    (config.crossTab.enabled &&
-    typeof window !== "undefined" &&
-    typeof BroadcastChannel !== "undefined"
+    (config.crossTab.enabled && isBrowserOrWorker && typeof BroadcastChannel !== "undefined"
       ? new BroadcastSyncAdapter(schema.name)
       : new NoopSyncAdapter());
 
@@ -45,7 +48,7 @@ export function createAdapterBundle(
 
   if (config.adapters.storage) {
     storage = config.adapters.storage;
-  } else if (typeof window !== "undefined" && typeof indexedDB !== "undefined") {
+  } else if (isBrowserOrWorker && typeof indexedDB !== "undefined") {
     storage = new IndexedDBStorageAdapter(schema, lock, sync);
   } else {
     if (config.fallback.strategy === "error") {

@@ -82,9 +82,14 @@ export class BroadcastSyncAdapter implements ISyncPort {
         ? crypto.randomUUID()
         : Math.random().toString(36).slice(2);
 
-    // CRITICAL: Guard with `typeof window !== "undefined"` to prevent Node.js 18+
+    // CRITICAL: Guard with `isBrowserOrWorker` to prevent Node.js 18+
     // global BroadcastChannel from instantiating a MessagePort that prevents process exit.
-    if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
+    const isBrowserOrWorker =
+      typeof window !== "undefined" ||
+      (typeof self !== "undefined" && typeof (self as any).importScripts === "function") ||
+      (typeof globalThis !== "undefined" && "WorkerGlobalScope" in globalThis);
+
+    if (isBrowserOrWorker && typeof BroadcastChannel !== "undefined") {
       this.channel = new BroadcastChannel(`use-idb:${dbName}`);
       this.channel.onmessage = (event: MessageEvent<unknown>) => {
         if (!isMutationEnvelope(event.data)) {

@@ -377,6 +377,26 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     expect(() => db.query("records")).toThrow(DatabaseDestroyedError);
   });
 
+  it("enables IndexedDBStorageAdapter in Web Worker scopes when window is undefined", () => {
+    const originalWindow = globalThis.window;
+    try {
+      // Simulate Web Worker environment: window is undefined, WorkerGlobalScope exists
+      delete (globalThis as any).window;
+      (globalThis as any).WorkerGlobalScope = function WorkerGlobalScope() {};
+
+      const db = createDatabase({
+        name: `worker-env-db-${Date.now()}`,
+        version: 1,
+        stores: { items: { keyPath: "id" } },
+      });
+
+      expect(db.storage.kind).toBe("indexeddb");
+    } finally {
+      (globalThis as any).window = originalWindow;
+      delete (globalThis as any).WorkerGlobalScope;
+    }
+  });
+
   it("accepts typed out-of-line keys without changing inline-key behavior", async () => {
     interface AuditEvent {
       kind: "created" | "updated";
