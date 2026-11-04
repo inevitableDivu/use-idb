@@ -115,8 +115,13 @@ function isFunctionUpdater<T>(
  * }
  * ```
  */
-export function useIdb<T>(key: string, options?: UseIdbOptions<T>): UseIdbReturn<T> {
-  const engine = useDatabase();
+export function useIdb<T>(
+  key: string,
+  options?: UseIdbOptions<T>,
+  customEngine?: Engine,
+): UseIdbReturn<T> {
+  const defaultEngine = useDatabase();
+  const engine = customEngine ?? defaultEngine;
   const storeName = options?.storeName ?? "keyval";
   const queryHash = `record:${storeName}:${toKeyString(key)}`;
 
