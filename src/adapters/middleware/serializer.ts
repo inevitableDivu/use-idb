@@ -11,6 +11,11 @@ export interface SerializationHook {
 
 const SERIALIZER_MARKER = "__use_idb_serializer__";
 const SERIALIZER_VERSION = 1;
+const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function isDangerousKey(key: string): boolean {
+  return DANGEROUS_KEYS.has(key);
+}
 
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -85,10 +90,12 @@ function encodeValue(value: unknown, ancestors: WeakSet<object>): unknown {
     // resemble serializer metadata without being misinterpreted during decode.
     return tagged(
       "object",
-      Object.keys(value).map((key) => [
-        key,
-        encodeValue((value as Record<string, unknown>)[key], ancestors),
-      ]),
+      Object.keys(value)
+        .filter((key) => !isDangerousKey(key))
+        .map((key) => [
+          key,
+          encodeValue((value as Record<string, unknown>)[key], ancestors),
+        ]),
     );
   } finally {
     ancestors.delete(value);
@@ -148,6 +155,7 @@ function decodeValue(value: unknown): unknown {
     // This path is for ordinary structures decoded from older envelopes.
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(record)) {
+      if (isDangerousKey(key)) continue;
       Object.defineProperty(result, key, {
         value: decodeValue(item),
         enumerable: true,
@@ -204,7 +212,9 @@ function decodeValue(value: unknown): unknown {
         if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") {
           throw new TypeError("Malformed object entry in serializer payload.");
         }
-        Object.defineProperty(result, entry[0], {
+        const key = entry[0];
+        if (isDangerousKey(key)) continue;
+        Object.defineProperty(result, key, {
           value: decodeValue(entry[1]),
           enumerable: true,
           configurable: true,
@@ -221,7 +231,8 @@ function decodeValue(value: unknown): unknown {
 }
 
 function decodeLegacyJSON(json: string): unknown {
-  return JSON.parse(json, (_key, val) => {
+  return JSON.parse(json, (key, val) => {
+    if (isDangerousKey(key)) return undefined;
     if (val && typeof val === "object" && "__t" in val) {
       const taggedValue = val as { __t: string; v: unknown };
       switch (taggedValue.__t) {
