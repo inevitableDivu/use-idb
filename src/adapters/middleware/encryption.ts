@@ -18,6 +18,108 @@ export class KeyNotFoundError extends Error {
 }
 
 /**
+ * Generates a random WebCrypto AES-GCM key suitable for encryption middleware.
+ *
+ * @param length - Bit length of the key (defaults to 256).
+ * @param extractable - Whether key bytes can be exported (defaults to true).
+ */
+export async function generateEncryptionKey(
+  length: 128 | 192 | 256 = 256,
+  extractable = true,
+): Promise<CryptoKey> {
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    throw new CryptographicContextUnavailableError();
+  }
+  return crypto.subtle.generateKey(
+    { name: "AES-GCM", length },
+    extractable,
+    ["encrypt", "decrypt"],
+  );
+}
+
+/**
+ * Derives an AES-GCM CryptoKey from a user passphrase and salt using PBKDF2 (SHA-256).
+ *
+ * @param passphrase - Secret passphrase or password string.
+ * @param salt - Salt bytes or string (recommended at least 16 random bytes).
+ * @param iterations - PBKDF2 iteration count (defaults to 100,000).
+ * @param length - Bit length of derived key (defaults to 256).
+ */
+export async function deriveEncryptionKey(
+  passphrase: string,
+  salt: Uint8Array | string,
+  iterations = 100_000,
+  length: 128 | 192 | 256 = 256,
+): Promise<CryptoKey> {
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    throw new CryptographicContextUnavailableError();
+  }
+  const enc = new TextEncoder();
+  const rawSalt = typeof salt === "string" ? enc.encode(salt) : salt;
+  const saltBuffer = new ArrayBuffer(rawSalt.byteLength);
+  new Uint8Array(saltBuffer).set(rawSalt);
+
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(passphrase),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"],
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: saltBuffer,
+      iterations,
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length },
+    true,
+    ["encrypt", "decrypt"],
+  );
+}
+
+/**
+ * Exports a CryptoKey to raw byte representation.
+ *
+ * @param key - Extractable AES-GCM CryptoKey.
+ * @returns Raw key bytes as Uint8Array.
+ */
+export async function exportKeyRaw(key: CryptoKey): Promise<Uint8Array> {
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    throw new CryptographicContextUnavailableError();
+  }
+  const buffer = await crypto.subtle.exportKey("raw", key);
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Imports raw byte representation back into an AES-GCM CryptoKey.
+ *
+ * @param rawKey - Raw key bytes as Uint8Array (must be 16, 24, or 32 bytes).
+ * @param extractable - Whether imported key can be exported again (defaults to true).
+ */
+export async function importKeyRaw(
+  rawKey: Uint8Array,
+  extractable = true,
+): Promise<CryptoKey> {
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    throw new CryptographicContextUnavailableError();
+  }
+  const buffer = new ArrayBuffer(rawKey.byteLength);
+  new Uint8Array(buffer).set(rawKey);
+  return crypto.subtle.importKey(
+    "raw",
+    buffer,
+    { name: "AES-GCM" },
+    extractable,
+    ["encrypt", "decrypt"],
+  );
+}
+
+/**
  * Keyring mapping key IDs to WebCrypto AES-GCM keys for rotation.
  */
 export interface KeyRing {

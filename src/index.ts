@@ -78,6 +78,10 @@ export { NoopLockAdapter } from "./adapters/lock/noop-lock-adapter";
 export { MiddlewarePipeline } from "./adapters/middleware/pipeline";
 export {
   createEncryptionMiddleware,
+  generateEncryptionKey,
+  deriveEncryptionKey,
+  exportKeyRaw,
+  importKeyRaw,
   CryptographicContextUnavailableError,
   KeyNotFoundError,
 } from "./adapters/middleware/encryption";

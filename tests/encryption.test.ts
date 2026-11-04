@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   createDatabase,
   createEncryptionMiddleware,
+  generateEncryptionKey,
+  deriveEncryptionKey,
+  exportKeyRaw,
+  importKeyRaw,
   CryptographicContextUnavailableError,
   MemoryStorageAdapter,
   defaultSerializer,
@@ -417,6 +421,48 @@ describe("Encryption Middleware & Cryptographic Hardening", () => {
     } finally {
       await db.destroy();
     }
+  });
+
+  it("generates, derives, exports, and imports AES-GCM encryption keys", async () => {
+    // 1. generateEncryptionKey
+    const generated = await generateEncryptionKey(256);
+    expect(generated.algorithm.name).toBe("AES-GCM");
+    expect((generated.algorithm as any).length).toBe(256);
+
+    // 2. exportKeyRaw and importKeyRaw
+    const rawBytes = await exportKeyRaw(generated);
+    expect(rawBytes.byteLength).toBe(32);
+    const imported = await importKeyRaw(rawBytes);
+    expect(imported.algorithm.name).toBe("AES-GCM");
+
+    // Test imported key works with encryption middleware
+    const mw = createEncryptionMiddleware(imported, ["secret"]);
+    const encrypted = (await mw.beforeWrite?.({
+      storeName: "items",
+      operation: "put",
+      key: "k1",
+      value: { secret: "payload-123" },
+    })) as any;
+    expect(encrypted.secret.__encrypted).toBe(true);
+
+    const decrypted = (await mw.afterRead?.({
+      storeName: "items",
+      key: "k1",
+      value: encrypted,
+    })) as any;
+    expect(decrypted.secret).toBe("payload-123");
+
+    // 3. deriveEncryptionKey from passphrase and salt
+    const salt = "unique-app-salt-1234";
+    const derived1 = await deriveEncryptionKey("user-master-passphrase", salt, 10_000);
+    const derived2 = await deriveEncryptionKey("user-master-passphrase", salt, 10_000);
+    const raw1 = await exportKeyRaw(derived1);
+    const raw2 = await exportKeyRaw(derived2);
+    expect(raw1).toEqual(raw2); // Deterministic derivation with same salt & passphrase
+
+    const derivedDifferent = await deriveEncryptionKey("different-passphrase", salt, 10_000);
+    const rawDifferent = await exportKeyRaw(derivedDifferent);
+    expect(rawDifferent).not.toEqual(raw1);
   });
 
   it("fails closed with CryptographicContextUnavailableError when crypto.subtle is absent", async () => {
