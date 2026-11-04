@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   createDatabase,
   DatabaseClosingForUpgradeError,
@@ -378,25 +378,17 @@ describe("Database Lifecycle & Upgrade Safety", () => {
   });
 
   it("removes document visibilitychange listener on close", async () => {
-    let removed = false;
-    const originalRemove = document.removeEventListener;
-    document.removeEventListener = function (type: string, listener: any) {
-      if (type === "visibilitychange") removed = true;
-      return originalRemove.call(this, type, listener);
-    };
+    const spy = vi.spyOn(document, "removeEventListener");
 
-    try {
-      const db = createDatabase({
-        name: `visibility-listener-cleanup-${Date.now()}`,
-        version: 1,
-        stores: { test: {} },
-      });
-      await db.close();
-      expect(removed).toBe(true);
-      await db.destroy();
-    } finally {
-      document.removeEventListener = originalRemove;
-    }
+    const db = createDatabase({
+      name: `visibility-listener-cleanup-${Date.now()}`,
+      version: 1,
+      stores: { test: {} },
+    });
+    await db.close();
+    expect(spy).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+    await db.destroy();
+    spy.mockRestore();
   });
 
   it("enables IndexedDBStorageAdapter in Web Worker scopes when window is undefined", () => {
