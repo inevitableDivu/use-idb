@@ -116,6 +116,56 @@ describe("Versioned rich serializer compatibility", () => {
     cyclic.self = cyclic;
     expect(() => defaultSerializer.encode(cyclic)).toThrow(/Cyclic values are not supported/);
   });
+
+  it("prevents prototype pollution from malicious serialized payloads", () => {
+    // 1. Attack via tagged object format with __proto__ and constructor
+    const attackTagged = {
+      __use_idb_serializer__: 1,
+      type: "root",
+      payload: {
+        __use_idb_serializer__: 1,
+        type: "object",
+        payload: [
+          ["__proto__", { polluted: "yes" }],
+          ["constructor", { prototype: { polluted: "yes" } }],
+          ["prototype", { polluted: "yes" }],
+          ["safeProp", "hello"],
+        ],
+      },
+    };
+    const attackBuffer = new TextEncoder().encode(JSON.stringify(attackTagged));
+    const decodedTagged = defaultSerializer.decode(attackBuffer) as Record<string, unknown>;
+
+    expect(decodedTagged.safeProp).toBe("hello");
+    expect(Object.prototype.hasOwnProperty.call(decodedTagged, "__proto__")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(decodedTagged, "constructor")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(decodedTagged, "prototype")).toBe(false);
+    expect((({} as Record<string, unknown>)).polluted).toBeUndefined();
+
+    // 2. Attack via legacy JSON payload
+    const legacyAttack = '{"__proto__": {"polluted": "legacy"}, "constructor": {"prototype": {"polluted": "legacy"}}, "title": "doc"}';
+    const legacyBuffer = new TextEncoder().encode(legacyAttack);
+    const decodedLegacy = defaultSerializer.decode(legacyBuffer) as Record<string, unknown>;
+
+    expect(decodedLegacy.title).toBe("doc");
+    expect(Object.prototype.hasOwnProperty.call(decodedLegacy, "__proto__")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(decodedLegacy, "constructor")).toBe(false);
+    expect((({} as Record<string, unknown>)).polluted).toBeUndefined();
+
+    // 3. Ensure encodeValue also filters dangerous keys
+    const objectWithDangerousKeys: Record<string, unknown> = { normal: 42 };
+    Object.defineProperty(objectWithDangerousKeys, "__proto__", {
+      value: { polluted: true },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    const encoded = defaultSerializer.encode(objectWithDangerousKeys);
+    const decoded = defaultSerializer.decode(encoded) as Record<string, unknown>;
+    expect(decoded.normal).toBe(42);
+    expect(Object.prototype.hasOwnProperty.call(decoded, "__proto__")).toBe(false);
+    expect((({} as Record<string, unknown>)).polluted).toBeUndefined();
+  });
 });
 
 describe("Collision-safe IndexedDB key identity", () => {
