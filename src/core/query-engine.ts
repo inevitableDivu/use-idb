@@ -296,6 +296,38 @@ export class QueryBuilder<
       this.ast.range = undefined;
       return;
     }
+    const currentRange = this.ast.range;
+    if (currentRange instanceof IDBKeyRange) {
+      if (bound === "lower") {
+        if (currentRange.upper !== undefined) {
+          try {
+            this.ast.range = IDBKeyRange.bound(
+              value,
+              currentRange.upper,
+              open,
+              currentRange.upperOpen,
+            );
+            return;
+          } catch {
+            // Invalid combination (e.g. lower > upper) falls through to lowerBound
+          }
+        }
+      } else {
+        if (currentRange.lower !== undefined) {
+          try {
+            this.ast.range = IDBKeyRange.bound(
+              currentRange.lower,
+              value,
+              currentRange.lowerOpen,
+              open,
+            );
+            return;
+          } catch {
+            // Invalid combination (e.g. lower > upper) falls through to upperBound
+          }
+        }
+      }
+    }
     this.ast.range =
       bound === "lower" ? IDBKeyRange.lowerBound(value, open) : IDBKeyRange.upperBound(value, open);
   }

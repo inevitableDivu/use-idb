@@ -308,6 +308,43 @@ describe("QueryBuilder", () => {
     await db.destroy();
   });
 
+  it("merges lower and upper bounds into a single IDBKeyRange.bound when chaining range methods", async () => {
+    const db = createDatabase({
+      name: `chained-range-db-${Date.now()}`,
+      version: 1,
+      stores: {
+        products: store<Product>()({
+          keyPath: "id",
+          indexes: { by_price: "price" },
+        }),
+      },
+    });
+
+    for (let i = 1; i <= 10; i++) {
+      await db.put("products", {
+        id: `p${i}`,
+        name: `Item ${i}`,
+        price: i * 10,
+        inStock: true,
+      });
+    }
+
+    const query = db.query("products").where("by_price").gte(30).and("by_price").lte(70);
+    const ast = (query as any).getAST();
+    expect(ast.range).toBeInstanceOf(IDBKeyRange);
+    const range = ast.range as IDBKeyRange;
+    expect(range.lower).toBe(30);
+    expect(range.upper).toBe(70);
+    expect(range.lowerOpen).toBe(false);
+    expect(range.upperOpen).toBe(false);
+
+    const results = await query.toArray();
+    expect(results).toHaveLength(5); // 30, 40, 50, 60, 70
+    expect(results.map((p) => p.price)).toEqual([30, 40, 50, 60, 70]);
+
+    await db.destroy();
+  });
+
   it("explains the selected index path and JavaScript post-processing", async () => {
     const db = createDatabase({
       name: "query-explain-plan-db",
