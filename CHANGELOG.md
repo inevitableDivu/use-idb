@@ -2,6 +2,32 @@
 
 Notable user-facing changes are recorded here. Versions are published only after the corresponding release workflow succeeds.
 
+## 1.5.2 — Security Hardening & Developer Experience Release (2026-11-04)
+
+### Security & Cryptography
+
+- **Decrypted Query Predicate Filtering**: Postpone in-memory filter predicates in `src/core/query-engine.ts` until records are decrypted via `middleware.runAfterRead`, preventing ciphertext leaks and incorrect filter evaluation on raw encrypted payloads ([#18](https://github.com/inevitableDivu/use-idb/issues/18)).
+- **Prototype Pollution Defense in Serializer**: Sanitize decoded property keys against `__proto__`, `constructor`, and `prototype` in tagged object envelopes, legacy records, and JSON revivers; also filter dangerous keys during serialization ([#26](https://github.com/inevitableDivu/use-idb/issues/26)).
+- **WebCrypto Key Generation & Derivation Helpers**: Added standard client-side encryption utility functions `generateEncryptionKey()`, `deriveEncryptionKey()` (PBKDF2 with SHA-256), `exportKeyRaw()`, and `importKeyRaw()` to eliminate WebCrypto boilerplate ([#24](https://github.com/inevitableDivu/use-idb/issues/24)).
+- **Remote Lock Release Hardening**: Ignored unauthenticated `force_release` cross-tab messages unless the engine is actively closing for a local schema upgrade ([#20](https://github.com/inevitableDivu/use-idb/issues/20)).
+
+### Core Engine & Platform Support
+
+- **Web Worker & Service Worker Scope Support**: Extended global scope detection in `src/core/adapter-factory.ts` and `src/adapters/sync/broadcast-adapter.ts` (`WorkerGlobalScope`, `'importScripts' in self`) so IndexedDB and BroadcastSync operate seamlessly in worker threads ([#19](https://github.com/inevitableDivu/use-idb/issues/19)).
+- **Safari Event Listener Cleanup**: Removed `visibilitychange` listeners on database close in `IDBStorageAdapter` to avoid document listener leaks during repeated connect/close cycles in Safari ([#20](https://github.com/inevitableDivu/use-idb/issues/20)).
+- **Chained Range Bound Merging**: Merged existing lower and upper bounds into `IDBKeyRange.bound(lower, upper, lowerOpen, upperOpen)` when chaining range operators (such as `above()` and `below()`), fixing bound clobbering ([#23](https://github.com/inevitableDivu/use-idb/issues/23)).
+- **HMR & Fast Refresh Registry Protection**: Replaced reference-based `identityOf` in `src/core/database-registry.ts` with normalized function signature serialization for migrations and diagnostic handlers, preventing false `DatabaseConfigurationConflictError` throws during Vite/Next.js hot reloads ([#25](https://github.com/inevitableDivu/use-idb/issues/25)).
+
+### React & Developer Experience
+
+- **Typed `useIdb` in `createDatabaseHooks`**: Added custom engine binding support to `useIdb` and exposed typed `useIdb` from the `createDatabaseHooks` factory, allowing component-level custom store access with full TypeScript autocompletion ([#21](https://github.com/inevitableDivu/use-idb/issues/21)).
+- **Async Query Store Dependency Warnings**: Added non-production warning when `useLiveQuery` receives an `async` query callback without explicit `stores: [...]` options, helping developers avoid missed updates from asynchronous dependency discovery ([#22](https://github.com/inevitableDivu/use-idb/issues/22)).
+
+## 1.3.0 — Documentation & Packaging (2026-10-23)
+
+- Package documentation rewrite and README improvements.
+- CI and release workflow hardening.
+
 ## 1.2.0 — Prepared release (2026-10-23)
 
 ### Reliability and correctness
