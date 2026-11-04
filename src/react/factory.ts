@@ -1,4 +1,5 @@
 import { useDatabase } from "./context";
+import { useIdb as useIdbUntyped, type UseIdbOptions, type UseIdbReturn } from "./use-idb";
 import {
   useRecord as useRecordUntyped,
   type UseRecordOptions,
@@ -50,6 +51,18 @@ export function createDatabaseHooks<TSchema extends DatabaseSchema<any> = Databa
   }
 
   return {
+    useIdb: <K extends StoreNames<TSchema> = StoreNames<TSchema>>(
+      key: string,
+      options?: UseIdbOptions<StoreValue<TSchema, K>> & { storeName?: K },
+    ): UseIdbReturn<StoreValue<TSchema, K>> => {
+      const engine = useResolvedEngine();
+      return useIdbUntyped<StoreValue<TSchema, K>>(
+        key,
+        options as UseIdbOptions<StoreValue<TSchema, K>> | undefined,
+        engine,
+      );
+    },
+
     useRecord: <K extends StoreNames<TSchema>>(
       storeName: K,
       key: StoreKey<TSchema, K> | undefined,

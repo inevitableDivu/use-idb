@@ -55,6 +55,27 @@ describe("createDatabaseHooks Factory", () => {
       ]);
     });
 
+    // Verify useIdb hook bound to factory
+    const { result: idbResult } = renderHook(() =>
+      hooks.useIdb("global-config", {
+        defaultValue: { id: "global-config", title: "Site Settings", views: 1 },
+        storeName: "articles",
+      }),
+    );
+    expect(idbResult.current.value?.title).toBe("Site Settings");
+
+    await act(async () => {
+      await idbResult.current.setValue({
+        id: "global-config",
+        title: "Updated Settings",
+        views: 2,
+      });
+    });
+
+    await waitFor(() => {
+      expect(idbResult.current.value?.title).toBe("Updated Settings");
+    });
+
     // Verify IDBStatus hook
     const { result: statusResult } = renderHook(() => hooks.useIDBStatus());
     expect(statusResult.current.connectionState).toBeDefined();
