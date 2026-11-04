@@ -119,6 +119,18 @@ export function useLiveQuery<T>(
         },
       });
       const result = queryFnRef.current(trackedEngine, { signal: new AbortController().signal });
+      if (
+        result &&
+        typeof (result as { then?: unknown }).then === "function" &&
+        !options?.stores &&
+        process.env.NODE_ENV !== "production"
+      ) {
+        console.warn(
+          "[use-idb] useLiveQuery was passed an async query function without an explicit 'stores' option. " +
+            "Synchronous dependency discovery cannot detect object stores accessed after 'await'. " +
+            "Please specify 'stores: [\"storeName\"]' in options to ensure reactivity.",
+        );
+      }
       const builder = result instanceof QueryBuilder ? result : queryBuilders[0];
       if (builder) {
         const names = [

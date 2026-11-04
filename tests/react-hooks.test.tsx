@@ -213,6 +213,35 @@ describe("React Hooks", () => {
       });
     });
 
+    it("warns when passed an async query function without options.stores", async () => {
+      const db = createDatabase({
+        name: `test-async-warn-db-${Date.now()}`,
+        version: 1,
+        stores: { items: { keyPath: "id" } },
+      });
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      renderHook(() =>
+        useLiveQuery(
+          async (engine) => {
+            const item = await engine.get("items", "1");
+            return item ? [item] : [];
+          },
+          [],
+          undefined,
+          db,
+        ),
+      );
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("useLiveQuery was passed an async query function without an explicit 'stores' option"),
+      );
+
+      warnSpy.mockRestore();
+      await db.destroy();
+    });
+
     it("suspends on initial query read and resolves with live query data", async () => {
       const db = createDatabase({
         name: "test-suspense-db",
