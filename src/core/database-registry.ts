@@ -26,10 +26,20 @@ function identityOf(value: object): number {
   return id;
 }
 
+function functionSignature(value: unknown): string {
+  if (typeof value === "function") {
+    return value.toString().replace(/\s+/g, " ").trim();
+  }
+  if (typeof value === "object" && value !== null) {
+    return String(identityOf(value));
+  }
+  return String(value);
+}
+
 function getSchemaSignature(schema: DatabaseSchema<any>): string {
   const migrations = Object.entries(schema.migrations ?? {})
     .sort(([left], [right]) => Number(left) - Number(right))
-    .map(([version, migration]) => [version, identityOf(migration)]);
+    .map(([version, migration]) => [version, functionSignature(migration)]);
 
   const stores = Object.fromEntries(
     Object.entries(schema.stores as Record<string, StoreConfig<any, any>>)
@@ -72,8 +82,8 @@ function getRuntimeSignature(config: ResolvedEngineConfig): string {
     crossTab: config.crossTab,
     fallback: config.fallback,
     diagnostics: {
-      onEvent: config.diagnostics?.onEvent ? identityOf(config.diagnostics.onEvent) : null,
-      onError: config.diagnostics?.onError ? identityOf(config.diagnostics.onError) : null,
+      onEvent: config.diagnostics?.onEvent ? functionSignature(config.diagnostics.onEvent) : null,
+      onError: config.diagnostics?.onError ? functionSignature(config.diagnostics.onError) : null,
     },
   });
 }

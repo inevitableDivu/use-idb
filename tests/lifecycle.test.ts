@@ -95,6 +95,63 @@ describe("Database Lifecycle & Upgrade Safety", () => {
     await first.destroy();
   });
 
+  it("allows re-registration during HMR / Fast Refresh when schema and diagnostics functions are re-created", async () => {
+    const makeSchema = () => ({
+      name: "hmr-fast-refresh-test-db",
+      version: 2,
+      stores: { items: { keyPath: "id" } },
+      migrations: {
+        2: (ctx: unknown) => {
+          void ctx;
+        },
+      },
+    });
+
+    const first = createDatabase(makeSchema(), {
+      storage: new MemoryStorageAdapter(),
+      diagnostics: {
+        onError: (err) => {
+          void err;
+        },
+      },
+    });
+
+    // Simulated HMR / Fast Refresh: identical schema structure and diagnostic handlers
+    // re-evaluated into fresh function closures.
+    let second: ReturnType<typeof createDatabase> | undefined;
+    expect(() => {
+      second = createDatabase(makeSchema(), {
+        storage: first.storage,
+        diagnostics: {
+          onError: (err) => {
+            void err;
+          },
+        },
+      });
+    }).not.toThrow();
+
+    expect(second).toBe(first);
+
+    // But if migration function code differs, it must throw a schema conflict
+    expect(() => {
+      createDatabase(
+        {
+          name: "hmr-fast-refresh-test-db",
+          version: 2,
+          stores: { items: { keyPath: "id" } },
+          migrations: {
+            2: () => {
+              throw new Error("different migration");
+            },
+          },
+        },
+        { storage: first.storage },
+      );
+    }).toThrow(/schema/);
+
+    await first.destroy();
+  });
+
   it("rejects operations with DatabaseClosingForUpgradeError during remote upgrade", async () => {
     const db = createDatabase({
       name: "test-upgrade-guard-db",
