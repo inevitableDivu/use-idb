@@ -477,8 +477,18 @@ export class QueryBuilder<
   async toArray(): Promise<TResult[]> {
     this.throwIfAborted();
     const plan = compileQueryPlan(this.ast);
+    const hasMiddleware = Boolean(this.middleware?.hasMiddleware);
+    const needsPostFilter = Boolean(plan.ast.filterPredicate) && hasMiddleware;
     const needsPostSort = plan.summary.requiresPostSort;
-    const ast = needsPostSort ? { ...plan.ast, offsetCount: 0, limitCount: undefined } : plan.ast;
+    const needsPostProcessing = needsPostSort || needsPostFilter;
+    const ast = needsPostProcessing
+      ? {
+          ...plan.ast,
+          filterPredicate: needsPostFilter ? undefined : plan.ast.filterPredicate,
+          offsetCount: 0,
+          limitCount: undefined,
+        }
+      : plan.ast;
     let results: T[] = [];
     let resultKeys: (IDBValidKey | undefined)[] = [];
     if (
@@ -536,6 +546,10 @@ export class QueryBuilder<
       results = transformed;
     }
 
+    if (needsPostFilter && this.ast.filterPredicate) {
+      results = results.filter((item) => this.ast.filterPredicate!(item));
+    }
+
     if (this.ast.orderField) {
       const field = this.ast.orderField;
       const direction = this.ast.orderDirection === "desc" ? -1 : 1;
@@ -553,10 +567,10 @@ export class QueryBuilder<
       });
     }
 
-    if (needsPostSort && this.ast.offsetCount > 0) {
+    if (needsPostProcessing && this.ast.offsetCount > 0) {
       results = results.slice(this.ast.offsetCount);
     }
-    if (needsPostSort && this.ast.limitCount !== undefined) {
+    if (needsPostProcessing && this.ast.limitCount !== undefined) {
       results = results.slice(0, this.ast.limitCount);
     }
 
@@ -608,7 +622,7 @@ export class QueryBuilder<
       );
     }
     // A post-filter or post-sort requires executing the full query semantics.
-    const results = await this.storage.cursor(plan.ast);
+    const results = await this.toArray();
     return results.length;
   }
 
